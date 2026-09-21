@@ -45,6 +45,7 @@ Usage:
 
 Commandes:
   install     Installer un ou plusieurs composants (deployment, git-devops, database)
+              (additif : conserve les scopes déjà installés ; retrait via uninstall)
   update      Mettre a jour l'installation existante
   uninstall   Desinstaller partiellement ou totalement
   status      Afficher l'etat de l'installation
@@ -941,6 +942,12 @@ install_command() {
         previous_ref="${CURRENT_REF:-}"
         previous_commit="${CURRENT_COMMIT:-}"
         previous_version="${CURRENT_VERSION:-}"
+
+        # Install ADDITIF : les scopes déjà installés sont conservés (on ne
+        # supprime jamais un scope via `install` — utilisez `uninstall` pour ça).
+        if [ "${INSTALL_DEPLOYMENT:-0}" = "1" ]; then SCOPE_DEPLOYMENT=1; fi
+        if [ "${INSTALL_GIT_DEVOPS:-0}" = "1" ]; then SCOPE_GIT_DEVOPS=1; fi
+        if [ "${INSTALL_DATABASE:-0}" = "1" ]; then SCOPE_DATABASE=1; fi
     fi
 
     local current_ref
