@@ -1,0 +1,28 @@
+# =============================================================================
+# Manifeste GitOps — état déclaré des droits (db-analytics-oscrum)
+#
+# Copier en state.conf et versionner en git. La commande `state plan` compare
+# ce fichier à l'état réel de la base ; `state apply` réconcilie ; `state drift`
+# détecte les écarts (utilisateurs présents en base mais absents d'ici).
+#
+# Format (un objet par ligne, # = commentaire) :
+#   user   <name> [profile=<engineer|analyst|bi|service|admin>] [conn_limit=N]
+#   assign <name> <profile>
+#   apply  <db> <schema> <profile>        # idempotent
+# =============================================================================
+
+# --- Utilisateurs ---
+user   alice    profile=analyst  conn_limit=5
+user   bob      profile=engineer
+user   svc_etl  profile=service
+
+# --- Assignation des profils RBAC ---
+assign alice    analyst
+assign bob      engineer
+
+# --- Application des templates de droits sur les schémas ---
+apply  db_analytics_oscrum  staging  engineer
+apply  db_analytics_oscrum  dwh      engineer
+apply  db_analytics_oscrum  dwh      analyst
+apply  db_analytics_oscrum  marts    analyst
+apply  db_analytics_oscrum  marts    bi

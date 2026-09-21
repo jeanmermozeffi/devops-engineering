@@ -130,8 +130,14 @@ load_devops_config() {
             staging_branch)
                 export STAGING_BRANCH="$value"
                 ;;
+            main_branch)
+                export MAIN_BRANCH="$value"
+                ;;
             prod_branch)
                 export PROD_BRANCH="$value"
+                ;;
+            feature_prefix)
+                export FEATURE_PREFIX="$value"
                 ;;
 
             # Ports
@@ -407,7 +413,9 @@ load_devops_config() {
     # Branches
     export DEV_BRANCH="${DEV_BRANCH:-dev}"
     export STAGING_BRANCH="${STAGING_BRANCH:-staging}"
+    export MAIN_BRANCH="${MAIN_BRANCH:-main}"
     export PROD_BRANCH="${PROD_BRANCH:-main}"
+    export FEATURE_PREFIX="${FEATURE_PREFIX:-feature/}"
 
     # GIT_REPO: fallback auto depuis le remote Git local si non défini
     if [ -z "$GIT_REPO" ] && command -v git >/dev/null 2>&1; then

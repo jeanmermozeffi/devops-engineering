@@ -1,0 +1,98 @@
+# =============================================================================
+# servers.conf — Configuration multi-serveurs — EXEMPLE
+# =============================================================================
+#
+# UTILISATION
+# -----------
+# 1. Copier ce fichier :
+#      cp servers.conf.example servers.conf
+#
+# 2. Remplir / ajouter vos sections [nom-serveur]
+#
+# 3. Sécuriser le fichier (OBLIGATOIRE — contient des secrets) :
+#      chmod 600 servers.conf
+#
+# 4. Se connecter :
+#      ./connect.sh
+#
+# NE PAS COMMITTER servers.conf → déjà dans .gitignore
+#
+# =============================================================================
+# FORMAT D'UNE SECTION
+# =============================================================================
+#
+# [identifiant-unique]
+# DESCRIPTION="Texte court affiché dans le menu"
+# PG_HOST="<IP ou hostname>"
+# PG_PORT="<port>"
+# PG_ADMIN_USER="<utilisateur admin>"
+# PG_ADMIN_PASSWORD="<mot de passe>"
+# PG_DEFAULT_DB="<base par défaut>"
+# USE_SSH="local|docker|ssh"
+# SSH_HOST=""           # uniquement si USE_SSH="ssh"
+# SSH_PORT="22"
+# SSH_USER=""
+# SSH_KEY=""
+# DOCKER_CONTAINER=""   # uniquement si USE_SSH="docker"
+#
+# =============================================================================
+
+# --- Serveur de production (VPS, psql local ou distant) ---
+[oscrum-vps]
+DESCRIPTION="OSCRUM VPS Production — PostgreSQL principal"
+PG_HOST=""
+PG_PORT="5435"
+PG_ADMIN_USER="admin_analytics_oscrum"
+PG_ADMIN_PASSWORD="VOTRE_MOT_DE_PASSE"
+PG_DEFAULT_DB="db_analytics_oscrum"
+USE_SSH="local"
+SSH_HOST=""
+SSH_PORT="22"
+SSH_USER=""
+SSH_KEY=""
+DOCKER_CONTAINER=""
+
+# --- Serveur de production via SSH (port PG non exposé) ---
+[oscrum-vps-ssh]
+DESCRIPTION="OSCRUM VPS Production — via tunnel SSH"
+PG_HOST="localhost"
+PG_PORT="5435"
+PG_ADMIN_USER="admin_analytics_oscrum"
+PG_ADMIN_PASSWORD="VOTRE_MOT_DE_PASSE"
+PG_DEFAULT_DB="db_analytics_oscrum"
+USE_SSH="ssh"
+SSH_HOST=""
+SSH_PORT="22"
+SSH_USER="deploy"
+SSH_KEY="~/.ssh/id_rsa_example"
+DOCKER_CONTAINER=""
+
+# --- Serveur local Docker (développement) ---
+[local-dev]
+DESCRIPTION="PostgreSQL local — développement Docker"
+PG_HOST="localhost"
+PG_PORT="5435"
+PG_ADMIN_USER="admin_analytics_oscrum"
+PG_ADMIN_PASSWORD="VOTRE_MOT_DE_PASSE"
+PG_DEFAULT_DB="db_analytics_oscrum"
+USE_SSH="docker"
+SSH_HOST=""
+SSH_PORT="22"
+SSH_USER=""
+SSH_KEY=""
+DOCKER_CONTAINER="db-analytics-oscrum"
+
+# --- Autre serveur (RH, Finance, etc.) ---
+[autre-serveur]
+DESCRIPTION="Exemple — second serveur PostgreSQL"
+PG_HOST="10.0.0.5"
+PG_PORT="5432"
+PG_ADMIN_USER="admin"
+PG_ADMIN_PASSWORD="VOTRE_MOT_DE_PASSE"
+PG_DEFAULT_DB="ma_base"
+USE_SSH="local"
+SSH_HOST=""
+SSH_PORT="22"
+SSH_USER=""
+SSH_KEY=""
+DOCKER_CONTAINER=""

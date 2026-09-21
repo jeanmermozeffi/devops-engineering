@@ -36,6 +36,7 @@ MANIFEST_TMP=""
 
 SCOPE_DEPLOYMENT=0
 SCOPE_GIT_DEVOPS=0
+SCOPE_DATABASE=0
 
 print_usage() {
     cat <<'EOF'
@@ -43,7 +44,7 @@ Usage:
   devops-manager [commande] [options]
 
 Commandes:
-  install     Installer un ou plusieurs composants (deployment, git-devops)
+  install     Installer un ou plusieurs composants (deployment, git-devops, database)
   update      Mettre a jour l'installation existante
   uninstall   Desinstaller partiellement ou totalement
   status      Afficher l'etat de l'installation
@@ -52,7 +53,7 @@ Commandes:
 Sans commande, le script ouvre un menu interactif.
 
 Options pour install:
-  --scope <all|deployment|git-devops|deployment,git-devops>
+  --scope <all|deployment|git-devops|database  (ou liste: deployment,database)>
   --source <managed|local>         (defaut: managed en interactif, local en non-interactif)
   --repo-url <url>                 (requis si --source managed et URL non detectable)
   --ref <branch-or-tag>            (defaut: main, ref suivie pour les updates)
@@ -67,7 +68,7 @@ Commande globale exposee:
   devops-manager                   (lance le menu interactif)
 
 Options pour update:
-  --scope <all|deployment|git-devops|deployment,git-devops>
+  --scope <all|deployment|git-devops|database  (ou liste: deployment,database)>
   --latest                         (mode managed uniquement; defaut en non-interactif)
   --version <tag-or-ref>           (mode managed uniquement)
   --rollback                       (mode managed uniquement; revient a la version precedente)
@@ -79,7 +80,7 @@ Options pour update:
   --help
 
 Options pour uninstall:
-  --scope <all|deployment|git-devops|deployment,git-devops>
+  --scope <all|deployment|git-devops|database  (ou liste: deployment,database)>
   --remove-managed-source          (supprime le clone managed si plus aucun scope installe)
   --remove-git-alias               (force la suppression de l'alias global git deploy)
   --keep-git-alias                 (conserve l'alias global git deploy)
@@ -163,6 +164,7 @@ confirm_yes_no() {
 reset_scope_flags() {
     SCOPE_DEPLOYMENT=0
     SCOPE_GIT_DEVOPS=0
+    SCOPE_DATABASE=0
 }
 
 parse_scope_flags() {
@@ -179,6 +181,7 @@ parse_scope_flags() {
     if [ -z "$normalized" ] || [ "$normalized" = "all" ]; then
         SCOPE_DEPLOYMENT=1
         SCOPE_GIT_DEVOPS=1
+        SCOPE_DATABASE=1
         return
     fi
 
@@ -189,6 +192,7 @@ parse_scope_flags() {
             all)
                 SCOPE_DEPLOYMENT=1
                 SCOPE_GIT_DEVOPS=1
+                SCOPE_DATABASE=1
                 ;;
             deployment|deploy)
                 SCOPE_DEPLOYMENT=1
@@ -196,27 +200,26 @@ parse_scope_flags() {
             git-devops|gitdevops|git-deploy|git)
                 SCOPE_GIT_DEVOPS=1
                 ;;
+            database|db|pg-admin|pgadmin|postgres)
+                SCOPE_DATABASE=1
+                ;;
             *)
-                die "Scope invalide: '$token'. Utilisez all, deployment ou git-devops."
+                die "Scope invalide: '$token'. Utilisez all, deployment, git-devops ou database."
                 ;;
         esac
     done
 
-    if [ "$SCOPE_DEPLOYMENT" -eq 0 ] && [ "$SCOPE_GIT_DEVOPS" -eq 0 ]; then
+    if [ "$SCOPE_DEPLOYMENT" -eq 0 ] && [ "$SCOPE_GIT_DEVOPS" -eq 0 ] && [ "$SCOPE_DATABASE" -eq 0 ]; then
         die "Aucun scope valide sélectionné."
     fi
 }
 
 scope_label() {
-    if [ "$SCOPE_DEPLOYMENT" -eq 1 ] && [ "$SCOPE_GIT_DEVOPS" -eq 1 ]; then
+    if [ "$SCOPE_DEPLOYMENT" -eq 1 ] && [ "$SCOPE_GIT_DEVOPS" -eq 1 ] && [ "$SCOPE_DATABASE" -eq 1 ]; then
         printf "all"
         return
     fi
-    if [ "$SCOPE_DEPLOYMENT" -eq 1 ]; then
-        printf "deployment"
-        return
-    fi
-    printf "git-devops"
+    scope_list
 }
 
 scope_list() {
@@ -230,6 +233,30 @@ scope_list() {
         else
             list="git-devops"
         fi
+    fi
+    if [ "$SCOPE_DATABASE" -eq 1 ]; then
+        if [ -n "$list" ]; then
+            list="$list,database"
+        else
+            list="database"
+        fi
+    fi
+    printf "%s" "$list"
+}
+
+# Valeur de scope (all|liste) à partir des variables INSTALL_* du manifeste.
+manifest_scope_value() {
+    if [ "${INSTALL_DEPLOYMENT:-0}" = "1" ] && [ "${INSTALL_GIT_DEVOPS:-0}" = "1" ] && [ "${INSTALL_DATABASE:-0}" = "1" ]; then
+        printf "all"
+        return
+    fi
+    local list=""
+    [ "${INSTALL_DEPLOYMENT:-0}" = "1" ] && list="deployment"
+    if [ "${INSTALL_GIT_DEVOPS:-0}" = "1" ]; then
+        [ -n "$list" ] && list="$list,git-devops" || list="git-devops"
+    fi
+    if [ "${INSTALL_DATABASE:-0}" = "1" ]; then
+        [ -n "$list" ] && list="$list,database" || list="database"
     fi
     printf "%s" "$list"
 }
@@ -397,6 +424,12 @@ validate_source_for_scope() {
     if [ "$SCOPE_GIT_DEVOPS" -eq 1 ]; then
         [ -f "$source_dir/bin/git-deploy" ] || die "Fichier introuvable: $source_dir/bin/git-deploy"
     fi
+
+    if [ "$SCOPE_DATABASE" -eq 1 ]; then
+        [ -f "$source_dir/bin/pg-admin" ] || die "Fichier introuvable: $source_dir/bin/pg-admin"
+        [ -f "$source_dir/bin/db-connect" ] || die "Fichier introuvable: $source_dir/bin/db-connect"
+        [ -f "$source_dir/database/scripts/pg-admin.sh" ] || die "Fichier introuvable: $source_dir/database/scripts/pg-admin.sh"
+    fi
 }
 
 install_deployment_cli() {
@@ -435,6 +468,28 @@ install_manager_cli() {
     log_ok "Commande installée: $target_file -> $source_file"
 }
 
+install_database_cli() {
+    local source_dir="$1"
+    local bin_dir="$2"
+    local wrapper cmd source_file target_file
+
+    mkdir -p "$bin_dir"
+    # Deux wrappers : pg-admin (CLI DBA) et db-connect (lanceur multi-serveurs).
+    # On symlinke les wrappers bin/ (pas les scripts database/scripts/*, qui ne
+    # résolvent pas les symlinks pour leur SCRIPT_DIR).
+    for wrapper in "pg-admin" "db-connect"; do
+        source_file="$source_dir/bin/$wrapper"
+        target_file="$bin_dir/$wrapper"
+        chmod +x "$source_file" || true
+        ln -sfn "$source_file" "$target_file"
+        log_ok "Commande installée: $target_file -> $source_file"
+    done
+    # S'assurer que les vrais scripts sont exécutables.
+    for cmd in "pg-admin.sh" "connect.sh"; do
+        chmod +x "$source_dir/database/scripts/$cmd" 2>/dev/null || true
+    done
+}
+
 configure_git_alias() {
     local enable_alias="$1"
     if [ "$enable_alias" != "1" ]; then
@@ -469,6 +524,10 @@ install_selected_components() {
     if [ "$SCOPE_GIT_DEVOPS" -eq 1 ]; then
         install_git_deploy_cli "$source_dir" "$bin_dir"
         configure_git_alias "$enable_alias"
+    fi
+
+    if [ "$SCOPE_DATABASE" -eq 1 ]; then
+        install_database_cli "$source_dir" "$bin_dir"
     fi
 }
 
@@ -621,6 +680,7 @@ write_manifest_file() {
     manifest_write_var "BIN_DIR" "$bin_dir"
     manifest_write_var "INSTALL_DEPLOYMENT" "$SCOPE_DEPLOYMENT"
     manifest_write_var "INSTALL_GIT_DEVOPS" "$SCOPE_GIT_DEVOPS"
+    manifest_write_var "INSTALL_DATABASE" "$SCOPE_DATABASE"
     manifest_write_var "ENABLE_GIT_ALIAS" "$enable_git_alias"
     manifest_write_var "CURRENT_REF" "$current_ref"
     manifest_write_var "CURRENT_COMMIT" "$current_commit"
@@ -648,6 +708,7 @@ load_manifest_file() {
     BIN_DIR="${BIN_DIR:-$(default_bin_dir)}"
     INSTALL_DEPLOYMENT="${INSTALL_DEPLOYMENT:-0}"
     INSTALL_GIT_DEVOPS="${INSTALL_GIT_DEVOPS:-0}"
+    INSTALL_DATABASE="${INSTALL_DATABASE:-0}"
     ENABLE_GIT_ALIAS="${ENABLE_GIT_ALIAS:-1}"
     CURRENT_REF="${CURRENT_REF:-n/a}"
     CURRENT_COMMIT="${CURRENT_COMMIT:-n/a}"
@@ -661,10 +722,11 @@ interactive_choose_scope() {
     local choice=""
     echo ""
     echo "Quel périmètre installer ?"
-    echo "  1) all (deployment + git-devops)"
+    echo "  1) all (deployment + git-devops + database)"
     echo "  2) deployment"
     echo "  3) git-devops"
-    read -r -p "Choix [1-3] (1): " choice
+    echo "  4) database"
+    read -r -p "Choix [1-4] (1): " choice
     choice="$(trim "$choice")"
     choice="${choice:-1}"
 
@@ -672,6 +734,7 @@ interactive_choose_scope() {
         1) parse_scope_flags "all" ;;
         2) parse_scope_flags "deployment" ;;
         3) parse_scope_flags "git-devops" ;;
+        4) parse_scope_flags "database" ;;
         *) die "Choix invalide: $choice" ;;
     esac
 }
@@ -942,16 +1005,9 @@ update_command() {
 
     load_manifest_file
 
-    local installed_scope_value=""
-    if [ "$INSTALL_DEPLOYMENT" = "1" ] && [ "$INSTALL_GIT_DEVOPS" = "1" ]; then
-        installed_scope_value="all"
-    elif [ "$INSTALL_DEPLOYMENT" = "1" ]; then
-        installed_scope_value="deployment"
-    elif [ "$INSTALL_GIT_DEVOPS" = "1" ]; then
-        installed_scope_value="git-devops"
-    else
-        die "Le manifeste ne contient aucun scope installé."
-    fi
+    local installed_scope_value
+    installed_scope_value="$(manifest_scope_value)"
+    [ -n "$installed_scope_value" ] || die "Le manifeste ne contient aucun scope installé."
 
     if [ -n "$scope_input" ]; then
         parse_scope_flags "$scope_input"
@@ -960,6 +1016,9 @@ update_command() {
         fi
         if [ "$SCOPE_GIT_DEVOPS" -eq 1 ] && [ "$INSTALL_GIT_DEVOPS" != "1" ]; then
             die "Le scope git-devops n'est pas installé. Relancez install avec ce scope."
+        fi
+        if [ "$SCOPE_DATABASE" -eq 1 ] && [ "$INSTALL_DATABASE" != "1" ]; then
+            die "Le scope database n'est pas installé. Relancez install avec ce scope."
         fi
     else
         parse_scope_flags "$installed_scope_value"
@@ -984,13 +1043,15 @@ update_command() {
             echo "  1) all"
             echo "  2) deployment"
             echo "  3) git-devops"
-            read -r -p "Scope à mettre à jour [1-3] (1): " update_scope_choice
+            echo "  4) database"
+            read -r -p "Scope à mettre à jour [1-4] (1): " update_scope_choice
             update_scope_choice="$(trim "$update_scope_choice")"
             update_scope_choice="${update_scope_choice:-1}"
             case "$update_scope_choice" in
                 1) parse_scope_flags "all" ;;
                 2) parse_scope_flags "deployment" ;;
                 3) parse_scope_flags "git-devops" ;;
+                4) parse_scope_flags "database" ;;
                 *) die "Choix invalide: $update_scope_choice" ;;
             esac
             if [ "$SCOPE_DEPLOYMENT" -eq 1 ] && [ "$INSTALL_DEPLOYMENT" != "1" ]; then
@@ -998,6 +1059,9 @@ update_command() {
             fi
             if [ "$SCOPE_GIT_DEVOPS" -eq 1 ] && [ "$INSTALL_GIT_DEVOPS" != "1" ]; then
                 die "git-devops n'est pas installé."
+            fi
+            if [ "$SCOPE_DATABASE" -eq 1 ] && [ "$INSTALL_DATABASE" != "1" ]; then
+                die "database n'est pas installé."
             fi
         fi
 
@@ -1111,6 +1175,7 @@ update_command() {
     # Réutiliser les scopes installés depuis le manifeste (update peut être partiel)
     SCOPE_DEPLOYMENT="$INSTALL_DEPLOYMENT"
     SCOPE_GIT_DEVOPS="$INSTALL_GIT_DEVOPS"
+    SCOPE_DATABASE="$INSTALL_DATABASE"
 
     write_manifest_file \
         "$SOURCE_MODE" \
@@ -1162,16 +1227,9 @@ uninstall_command() {
 
     load_manifest_file
 
-    local installed_scope_value=""
-    if [ "$INSTALL_DEPLOYMENT" = "1" ] && [ "$INSTALL_GIT_DEVOPS" = "1" ]; then
-        installed_scope_value="all"
-    elif [ "$INSTALL_DEPLOYMENT" = "1" ]; then
-        installed_scope_value="deployment"
-    elif [ "$INSTALL_GIT_DEVOPS" = "1" ]; then
-        installed_scope_value="git-devops"
-    else
-        die "Le manifeste ne contient aucun scope installé."
-    fi
+    local installed_scope_value
+    installed_scope_value="$(manifest_scope_value)"
+    [ -n "$installed_scope_value" ] || die "Le manifeste ne contient aucun scope installé."
 
     if [ -n "$scope_input" ]; then
         parse_scope_flags "$scope_input"
@@ -1185,6 +1243,9 @@ uninstall_command() {
     if [ "$SCOPE_GIT_DEVOPS" -eq 1 ] && [ "$INSTALL_GIT_DEVOPS" != "1" ]; then
         die "Le scope git-devops n'est pas installé."
     fi
+    if [ "$SCOPE_DATABASE" -eq 1 ] && [ "$INSTALL_DATABASE" != "1" ]; then
+        die "Le scope database n'est pas installé."
+    fi
     if [ "$remove_git_alias" -eq 1 ] && [ "$keep_git_alias" -eq 1 ]; then
         die "Options incompatibles: --remove-git-alias et --keep-git-alias."
     fi
@@ -1196,12 +1257,16 @@ uninstall_command() {
 
     local new_install_deployment="$INSTALL_DEPLOYMENT"
     local new_install_git_devops="$INSTALL_GIT_DEVOPS"
+    local new_install_database="$INSTALL_DATABASE"
 
     if [ "$SCOPE_DEPLOYMENT" -eq 1 ]; then
         new_install_deployment="0"
     fi
     if [ "$SCOPE_GIT_DEVOPS" -eq 1 ]; then
         new_install_git_devops="0"
+    fi
+    if [ "$SCOPE_DATABASE" -eq 1 ]; then
+        new_install_database="0"
     fi
 
     # Comportement par défaut: si on retire git-devops, on retire aussi l'alias.
@@ -1221,7 +1286,7 @@ uninstall_command() {
             fi
         fi
 
-        if [ "$SOURCE_MODE" = "managed" ] && [ "$new_install_deployment" = "0" ] && [ "$new_install_git_devops" = "0" ] && [ "$remove_managed_source" -eq 0 ]; then
+        if [ "$SOURCE_MODE" = "managed" ] && [ "$new_install_deployment" = "0" ] && [ "$new_install_git_devops" = "0" ] && [ "$new_install_database" = "0" ] && [ "$remove_managed_source" -eq 0 ]; then
             if confirm_yes_no "Supprimer aussi le dossier source managed '$MANAGED_REPO_DIR' ?" "n"; then
                 remove_managed_source=1
             fi
@@ -1245,12 +1310,16 @@ uninstall_command() {
     if [ "$SCOPE_GIT_DEVOPS" -eq 1 ]; then
         remove_command_entry "$bin_dir/git-deploy" "git-devops" "$interactive" "$assume_yes"
     fi
+    if [ "$SCOPE_DATABASE" -eq 1 ]; then
+        remove_command_entry "$bin_dir/pg-admin" "database" "$interactive" "$assume_yes"
+        remove_command_entry "$bin_dir/db-connect" "database" "$interactive" "$assume_yes"
+    fi
 
     if [ "$remove_git_alias" -eq 1 ]; then
         remove_git_alias_deploy
     fi
 
-    if [ "$new_install_deployment" = "0" ] && [ "$new_install_git_devops" = "0" ]; then
+    if [ "$new_install_deployment" = "0" ] && [ "$new_install_git_devops" = "0" ] && [ "$new_install_database" = "0" ]; then
         remove_command_entry "$bin_dir/devops-manager" "manager" "$interactive" "$assume_yes"
         rm -f "$MANIFEST_FILE"
         rmdir "$STATE_DIR" 2>/dev/null || true
@@ -1275,6 +1344,7 @@ uninstall_command() {
 
     SCOPE_DEPLOYMENT="$new_install_deployment"
     SCOPE_GIT_DEVOPS="$new_install_git_devops"
+    SCOPE_DATABASE="$new_install_database"
     write_manifest_file \
         "$SOURCE_MODE" \
         "$SOURCE_DIR" \
@@ -1310,11 +1380,7 @@ status_command() {
     echo "  Managed dir    : $MANAGED_REPO_DIR"
     echo "  Repo URL       : $REPO_URL"
     echo "  Track ref      : $TRACK_REF"
-    echo "  Scope          : $( \
-        if [ "$INSTALL_DEPLOYMENT" = "1" ] && [ "$INSTALL_GIT_DEVOPS" = "1" ]; then echo "all"; \
-        elif [ "$INSTALL_DEPLOYMENT" = "1" ]; then echo "deployment"; \
-        else echo "git-devops"; fi \
-    )"
+    echo "  Scope          : $(manifest_scope_value)"
     echo "  Bin dir        : $BIN_DIR"
     echo "  Git alias      : $ENABLE_GIT_ALIAS"
     echo "  Current ref    : $CURRENT_REF"
@@ -1330,6 +1396,10 @@ status_command() {
     fi
     if [ "$INSTALL_GIT_DEVOPS" = "1" ]; then
         echo "  git-deploy cmd : $(command -v git-deploy 2>/dev/null || echo 'introuvable dans le PATH')"
+    fi
+    if [ "$INSTALL_DATABASE" = "1" ]; then
+        echo "  pg-admin cmd   : $(command -v pg-admin 2>/dev/null || echo 'introuvable dans le PATH')"
+        echo "  db-connect cmd : $(command -v db-connect 2>/dev/null || echo 'introuvable dans le PATH')"
     fi
 
     if [ "$SOURCE_MODE" = "managed" ]; then

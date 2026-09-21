@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Wrapper — le code réel est dans database/scripts/pg-admin.sh
+#
+# NB : pg-admin.sh calcule son SCRIPT_DIR sans résoudre les symlinks et
+# source pg-admin-ext.sh + lit ses configs voisines. On ne peut donc PAS
+# symlinker directement pg-admin.sh dans ~/.local/bin ; ce wrapper résout
+# son propre symlink puis exec le vrai script, dont BASH_SOURCE reste le
+# vrai chemin (database/scripts/), gardant le sourcing et les configs OK.
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+exec "$SCRIPT_DIR/../database/scripts/pg-admin.sh" "$@"

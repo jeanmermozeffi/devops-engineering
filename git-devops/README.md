@@ -160,6 +160,36 @@ Le script gère le workflow suivant :
 - **main** - Version stable (release)
 - **prod** - Production live
 
+### ⚙️ Noms de branches configurables
+
+Les noms ci-dessus sont des **valeurs par défaut**. Chaque projet peut les
+redéfinir (par ex. utiliser `develop` au lieu de `dev`). Précédence :
+**flag CLI > variable d'environnement > `.devops.yml` > défaut**.
+
+1. **`.devops.yml`** à la racine du projet (format plat) :
+
+   ```yaml
+   dev_branch: develop
+   staging_branch: staging
+   main_branch: main
+   prod_branch: prod
+   feature_prefix: feature/
+   ```
+
+2. **Variables d'environnement** : `BRANCH_DEV`, `BRANCH_STAGING`, `BRANCH_MAIN`,
+   `BRANCH_PROD`, `FEATURE_PREFIX`.
+
+3. **Flags CLI** : `--branch-dev`, `--branch-staging`, `--branch-main`,
+   `--branch-prod`, `--feature-prefix`, `--config <fichier.yml>`.
+
+```bash
+# Voir la configuration effective des branches
+git deploy --branches
+
+# Exemple : projet utilisant "develop"
+git deploy --branch-dev develop --branches
+```
+
 ## 📁 Emplacement
 
 - **Script source** : `/Users/jeanmermozeffi/PycharmProjects/devop-enginering/git-devop/git-deploy.sh`

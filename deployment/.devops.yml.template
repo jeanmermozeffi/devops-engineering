@@ -83,15 +83,26 @@ github_token:
 # ============================================================================
 # BRANCHES PAR ENVIRONNEMENT
 # ============================================================================
+# Ces clés sont lues à la fois par le déploiement (`devops`) et par `git-deploy`
+# (workflow feature → dev → staging → main → prod). Précédence côté git-deploy :
+# flag CLI > variable d'env > .devops.yml > défaut.
 
-# Branche pour l'environnement de développement
+# Branche pour l'environnement de développement / intégration
 dev_branch: dev
 
 # Branche pour l'environnement de staging/pré-production
 staging_branch: staging
 
-# Branche pour l'environnement de production
+# Branche stable / release (étape "main" du workflow git-deploy)
+main_branch: main
+
+# Branche de production.
+# NB : le déploiement historique mappe prod → main. Si votre workflow git-deploy
+# possède une branche `prod` distincte de `main`, mettez `prod_branch: prod`.
 prod_branch: main
+
+# Préfixe des branches de feature (git-deploy)
+feature_prefix: feature/
 
 # ============================================================================
 # PORTS (optionnel, valeurs par défaut si non spécifié)

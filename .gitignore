@@ -39,3 +39,18 @@ packages/
 packages/
 deployment/scripts/.registry-profiles/.current
 deployment/scripts/.registry-profiles/.last
+
+# ============================================================================
+# Outil base de données (scope `database` / pg-admin) — secrets & runtime
+# Seuls les fichiers .example sont versionnés.
+# ============================================================================
+database/scripts/pg-config.conf
+database/scripts/pg-config.*.conf
+database/scripts/servers.conf
+!database/scripts/*.example
+database/scripts/.credentials/
+database/scripts/logs/
+database/scripts/backups/
+database/scripts/desired/state.conf
+database/scripts/desired/state.exported.conf
+!database/scripts/desired/state.conf.example
