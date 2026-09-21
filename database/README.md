@@ -23,18 +23,30 @@ Sans installation, les scripts sont exécutables directement :
 
 ## Configuration
 
-Les scripts lisent leurs propres fichiers de connexion (non versionnés — partez
-des `*.example`) :
+Fichiers de connexion (non versionnés — partez des `*.example`) :
 
-| Fichier                         | Rôle                                   |
-| ------------------------------- | -------------------------------------- |
-| `scripts/pg-config.conf`        | Connexion mono-serveur                 |
-| `scripts/servers.conf`          | Profils multi-serveurs (INI)           |
-| `scripts/desired/state.conf`    | État déclaratif (GitOps `state apply`) |
+| Fichier              | Rôle                                   |
+| -------------------- | -------------------------------------- |
+| `pg-config.conf`     | Connexion mono-serveur (`pg-admin`)    |
+| `servers.conf`       | Profils multi-serveurs INI (`db-connect`) |
+| `desired/state.conf` | État déclaratif (GitOps `state apply`) |
+
+### Où placer la config
+
+Résolution par fichier, dans l'ordre :
+
+1. Variable d'env explicite : `PG_CONFIG_FILE` (mono-serveur) / `SERVERS_CONF_FILE` (multi).
+2. **`~/.config/devops/`** (recommandé — emplacement stable, hors du clone géré).
+3. Dossier du script (`database/scripts/`) — repli pour un checkout local.
+
+L'emplacement `~/.config/devops/` (ou `$XDG_CONFIG_HOME/devops`, surchargeable via
+`DEVOPS_CONFIG_HOME`) est recommandé en installation *managed* : il survit aux
+mises à jour **et** à un `uninstall --remove-managed-source`.
 
 ```bash
-cp scripts/pg-config.conf.example scripts/pg-config.conf
-cp scripts/servers.conf.example   scripts/servers.conf
+mkdir -p ~/.config/devops
+cp scripts/servers.conf.example   ~/.config/devops/servers.conf   && chmod 600 ~/.config/devops/servers.conf
+cp scripts/pg-config.conf.example ~/.config/devops/pg-config.conf && chmod 600 ~/.config/devops/pg-config.conf
 ```
 
 > ⚠️ Ne jamais committer les fichiers réels ni les dossiers `logs/`, `backups/`,

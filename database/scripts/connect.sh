@@ -11,7 +11,16 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVERS_FILE="${SCRIPT_DIR}/servers.conf"
+
+# Config stable hors du clone (~/.config/devops par défaut), repli sur SCRIPT_DIR.
+DEVOPS_CONFIG_HOME="${DEVOPS_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/devops}"
+if [[ -n "${SERVERS_CONF_FILE:-}" ]]; then
+    SERVERS_FILE="$SERVERS_CONF_FILE"
+elif [[ -f "$DEVOPS_CONFIG_HOME/servers.conf" ]]; then
+    SERVERS_FILE="$DEVOPS_CONFIG_HOME/servers.conf"
+else
+    SERVERS_FILE="${SCRIPT_DIR}/servers.conf"
+fi
 
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -26,9 +35,10 @@ readonly NC='\033[0m'
 # =============================================================================
 
 if [[ ! -f "$SERVERS_FILE" ]]; then
-    echo -e "${RED}[ERROR]${NC} Fichier servers.conf introuvable : $SERVERS_FILE"
-    echo -e "        Copier l'exemple : ${BOLD}cp servers.conf.example servers.conf${NC}"
-    echo -e "        Puis : ${BOLD}chmod 600 servers.conf${NC}"
+    echo -e "${RED}[ERROR]${NC} Fichier servers.conf introuvable."
+    echo -e "        Emplacement recommandé (stable) : ${BOLD}$DEVOPS_CONFIG_HOME/servers.conf${NC}"
+    echo -e "        Repli (local)                   : ${BOLD}$SCRIPT_DIR/servers.conf${NC}"
+    echo -e "        Init : ${BOLD}mkdir -p $DEVOPS_CONFIG_HOME && cp \"$SCRIPT_DIR/servers.conf.example\" \"$DEVOPS_CONFIG_HOME/servers.conf\" && chmod 600 \"$DEVOPS_CONFIG_HOME/servers.conf\"${NC}"
     exit 1
 fi
 
