@@ -8,7 +8,8 @@ Installer globalement une ou plusieurs parties du projet sans imposer la copie m
 
 - `deployment` (commande `devops`)
 - `git-devops` (commande `git-deploy` + alias `git deploy`)
-- `all` (les deux)
+- `database` (commandes `pg-admin` + `db-connect` — administration PostgreSQL)
+- `all` (les trois)
 
 ## Installation rapide (bootstrap, sans clone préalable)
 
@@ -56,7 +57,7 @@ Les sections suivantes (`./install.sh ...`) supposent que vous êtes **dans un c
 
 Le mode interactif permet de choisir:
 
-- le scope (`all`, `deployment`, `git-devops`)
+- le scope (`all`, `deployment`, `git-devops`, `database`)
 - le mode source:
   - `managed` (recommandé): clone géré localement pour faciliter les updates
   - `local`: utilise directement le checkout courant
@@ -81,6 +82,19 @@ Exemple (installer seulement `deployment` depuis le checkout local):
 ```bash
 ./install.sh --non-interactive --scope deployment --source local
 ```
+
+Exemple (installer seulement l'outil base de données `database`) :
+
+```bash
+./install.sh --non-interactive --scope database --source local
+```
+
+Le scope `database` installe deux commandes globales :
+
+- `pg-admin` : CLI d'administration PostgreSQL (bases, schémas, RBAC, sauvegardes, monitoring, audit).
+- `db-connect` : lanceur multi-serveurs (menu de profils défini dans `database/scripts/servers.conf`).
+
+Les configs réelles (`pg-config.conf`, `servers.conf`, …) ne sont **pas** versionnées ; partez des `*.example` de `database/scripts/`.
 
 ## Mises à jour
 
@@ -123,6 +137,9 @@ Exemples non interactifs:
 ```bash
 # Retirer seulement git-devops
 ./uninstall.sh --non-interactive --scope git-devops
+
+# Retirer seulement l'outil base de données
+./uninstall.sh --non-interactive --scope database
 
 # Retirer tout + alias git + dossier source managed
 ./uninstall.sh --non-interactive --scope all --remove-git-alias --remove-managed-source

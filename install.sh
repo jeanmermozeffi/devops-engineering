@@ -15,7 +15,7 @@ set -euo pipefail
 #      curl -fsSL .../install.sh | bash -s -- --scope deployment --non-interactive
 #
 # Options transmises à devops-manager install:
-#   --scope <all|deployment|git-devops>
+#   --scope <all|deployment|git-devops|database>
 #   --source <managed|local>
 #   --repo-url <url>
 #   --ref <branch-or-tag>

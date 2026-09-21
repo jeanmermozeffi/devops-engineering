@@ -45,20 +45,92 @@ unset __gd_sp __gd_dir
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════
 
-# Branches principales (modifiable selon votre workflow)
-BRANCH_DEV="dev"
-BRANCH_DEV_DEPLOY="develop"
-BRANCH_STAGING="staging"
-BRANCH_MAIN="main"
-BRANCH_PROD="prod"
+# Branches principales — configurables (voir load_branch_config).
+# Précédence : flag CLI > variable d'environnement > .devops.yml > défaut.
+# On capture d'abord une éventuelle valeur fournie par l'environnement afin de
+# pouvoir la ré-appliquer APRÈS la lecture du .devops.yml (env doit gagner sur
+# le fichier), puis on pose les défauts.
+_GD_ENV_BRANCH_DEV="${BRANCH_DEV:-}"
+_GD_ENV_BRANCH_STAGING="${BRANCH_STAGING:-}"
+_GD_ENV_BRANCH_MAIN="${BRANCH_MAIN:-}"
+_GD_ENV_BRANCH_PROD="${BRANCH_PROD:-}"
+_GD_ENV_FEATURE_PREFIX="${FEATURE_PREFIX:-}"
+
+BRANCH_DEV="${BRANCH_DEV:-dev}"
+BRANCH_STAGING="${BRANCH_STAGING:-staging}"
+BRANCH_MAIN="${BRANCH_MAIN:-main}"
+BRANCH_PROD="${BRANCH_PROD:-prod}"
 
 # Préfixes pour les branches de feature (supportés)
-FEATURE_PREFIX="feature/"
+FEATURE_PREFIX="${FEATURE_PREFIX:-feature/}"
 # Patterns additionnels reconnus comme branches de travail:
 # - feature/xxx, feat/xxx
 # - BE-xxx, FEAT-xxx, FIX-xxx, BUG-xxx (style Jira/ticket)
 # - issue-xxx, bugfix/xxx, hotfix/xxx
 FEATURE_PATTERNS="^(feature/|feat/|BE-|FEAT-|FIX-|BUG-|ISSUE-|issue-|bugfix/|fix/)"
+
+# Valeurs fournies via les flags CLI (précédence maximale). Vides par défaut ;
+# renseignées dans main() puis appliquées par configure_branches().
+FLAG_BRANCH_DEV=""
+FLAG_BRANCH_STAGING=""
+FLAG_BRANCH_MAIN=""
+FLAG_BRANCH_PROD=""
+FLAG_FEATURE_PREFIX=""
+# Fichier de config (par défaut .devops.yml à la racine du repo ; surchargé par --config).
+DEVOPS_CONFIG_FILE="${DEVOPS_CONFIG_FILE:-}"
+
+# Affecte $2 à la variable nommée $1 seulement si $2 est non vide (sûr avec set -e).
+_gd_apply() {
+    [ -n "$2" ] && printf -v "$1" '%s' "$2" || true
+}
+
+# Lit une clé "clé: valeur" (format plat) dans un .devops.yml, sans quotes ni
+# commentaire inline. Retourne un code non nul si la clé est absente/vide.
+_gd_yaml_get() {
+    local key="$1" file="$2" line value
+    [ -f "$file" ] || return 1
+    line=$(grep -E "^[[:space:]]*${key}[[:space:]]*:" "$file" | head -n1)
+    [ -n "$line" ] || return 1
+    value="${line#*:}"        # après le premier ':'
+    value="${value%%#*}"      # retirer un éventuel commentaire inline
+    value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    value="${value%\"}"; value="${value#\"}"   # quotes doubles
+    value="${value%\'}"; value="${value#\'}"   # quotes simples
+    [ -n "$value" ] && printf '%s' "$value"
+}
+
+# Charge les noms de branches depuis .devops.yml puis ré-applique les valeurs
+# d'environnement capturées (précédence env > fichier).
+load_branch_config() {
+    local repo_root config_file
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    config_file="${DEVOPS_CONFIG_FILE:-$repo_root/.devops.yml}"
+
+    if [ -f "$config_file" ]; then
+        _gd_apply BRANCH_DEV     "$(_gd_yaml_get dev_branch     "$config_file" || true)"
+        _gd_apply BRANCH_STAGING "$(_gd_yaml_get staging_branch "$config_file" || true)"
+        _gd_apply BRANCH_MAIN    "$(_gd_yaml_get main_branch    "$config_file" || true)"
+        _gd_apply BRANCH_PROD    "$(_gd_yaml_get prod_branch    "$config_file" || true)"
+        _gd_apply FEATURE_PREFIX "$(_gd_yaml_get feature_prefix "$config_file" || true)"
+    fi
+
+    _gd_apply BRANCH_DEV     "$_GD_ENV_BRANCH_DEV"
+    _gd_apply BRANCH_STAGING "$_GD_ENV_BRANCH_STAGING"
+    _gd_apply BRANCH_MAIN    "$_GD_ENV_BRANCH_MAIN"
+    _gd_apply BRANCH_PROD    "$_GD_ENV_BRANCH_PROD"
+    _gd_apply FEATURE_PREFIX "$_GD_ENV_FEATURE_PREFIX"
+}
+
+# Résout la configuration finale des branches (fichier + env + flags CLI).
+# Les flags CLI ont la précédence maximale.
+configure_branches() {
+    load_branch_config
+    _gd_apply BRANCH_DEV     "$FLAG_BRANCH_DEV"
+    _gd_apply BRANCH_STAGING "$FLAG_BRANCH_STAGING"
+    _gd_apply BRANCH_MAIN    "$FLAG_BRANCH_MAIN"
+    _gd_apply BRANCH_PROD    "$FLAG_BRANCH_PROD"
+    _gd_apply FEATURE_PREFIX "$FLAG_FEATURE_PREFIX"
+}
 
 # Couleurs pour l'affichage
 COLOR_RESET="\033[0m"
@@ -364,8 +436,9 @@ add_to_gitignore() {
 is_work_branch() {
     local branch="$1"
 
-    # Branches principales à exclure
-    local main_branches="^(main|master|dev|develop|staging|prod|production|release)$"
+    # Branches principales à exclure : les branches configurées + les alias
+    # bien connus (sûreté, même si non configurés dans ce projet).
+    local main_branches="^(${BRANCH_DEV}|${BRANCH_STAGING}|${BRANCH_MAIN}|${BRANCH_PROD}|main|master|dev|develop|staging|prod|production|release)$"
 
     # Si c'est une branche principale, ce n'est pas une branche de travail
     if [[ "$branch" =~ $main_branches ]]; then
@@ -394,13 +467,13 @@ get_branch_type() {
         echo "fix"
     elif [[ "$branch" =~ ^hotfix/ ]]; then
         echo "hotfix"
-    elif [[ "$branch" == "main" || "$branch" == "master" ]]; then
+    elif [[ "$branch" == "$BRANCH_MAIN" || "$branch" == "main" || "$branch" == "master" ]]; then
         echo "main"
-    elif [[ "$branch" == "dev" || "$branch" == "develop" ]]; then
+    elif [[ "$branch" == "$BRANCH_DEV" || "$branch" == "dev" || "$branch" == "develop" ]]; then
         echo "dev"
-    elif [[ "$branch" == "staging" ]]; then
+    elif [[ "$branch" == "$BRANCH_STAGING" || "$branch" == "staging" ]]; then
         echo "staging"
-    elif [[ "$branch" == "prod" || "$branch" == "production" ]]; then
+    elif [[ "$branch" == "$BRANCH_PROD" || "$branch" == "prod" || "$branch" == "production" ]]; then
         echo "prod"
     else
         echo "work"
@@ -2705,6 +2778,14 @@ show_help() {
     echo -e "    git-deploy --status          Afficher le statut rapide"
     echo -e "    git-deploy --branches        Afficher l'état des branches"
     echo ""
+    echo -e "${COLOR_BOLD}OPTIONS (branches configurables) :${COLOR_RESET}"
+    echo -e "    --branch-dev <nom>        Surcharger la branche d'intégration (défaut: ${BRANCH_DEV})"
+    echo -e "    --branch-staging <nom>    Surcharger la branche de pré-production (défaut: ${BRANCH_STAGING})"
+    echo -e "    --branch-main <nom>       Surcharger la branche stable/release (défaut: ${BRANCH_MAIN})"
+    echo -e "    --branch-prod <nom>       Surcharger la branche de production (défaut: ${BRANCH_PROD})"
+    echo -e "    --feature-prefix <p>      Surcharger le préfixe des features (défaut: ${FEATURE_PREFIX})"
+    echo -e "    --config <fichier.yml>    Lire les branches depuis ce .devops.yml"
+    echo ""
     echo -e "${COLOR_BOLD}FONCTIONNALITÉS:${COLOR_RESET}"
     echo ""
     echo -e "    ${COLOR_BOLD}${COLOR_CYAN}Développement:${COLOR_RESET}"
@@ -2799,12 +2880,25 @@ show_help() {
     echo -e "    10. Déployer prod:     ./git-deploy → Option 18"
     echo -e "        → Choisir où aller après le merge"
     echo ""
-    echo -e "${COLOR_BOLD}CONFIGURATION:${COLOR_RESET}"
-    echo -e "    Les noms de branches peuvent être modifiés dans le script:"
-    echo -e "    - BRANCH_DEV=\"${BRANCH_DEV}\""
-    echo -e "    - BRANCH_STAGING=\"${BRANCH_STAGING}\""
-    echo -e "    - BRANCH_MAIN=\"${BRANCH_MAIN}\""
-    echo -e "    - BRANCH_PROD=\"${BRANCH_PROD}\""
+    echo -e "${COLOR_BOLD}CONFIGURATION DES BRANCHES:${COLOR_RESET}"
+    echo -e "    Noms configurables (précédence : flag CLI > variable d'env > .devops.yml > défaut)."
+    echo -e "    Valeurs effectives actuelles :"
+    echo -e "    - dev     = ${BRANCH_DEV}      (dev_branch)"
+    echo -e "    - staging = ${BRANCH_STAGING}  (staging_branch)"
+    echo -e "    - main    = ${BRANCH_MAIN}     (main_branch)"
+    echo -e "    - prod    = ${BRANCH_PROD}     (prod_branch)"
+    echo -e "    - prefix  = ${FEATURE_PREFIX}  (feature_prefix)"
+    echo ""
+    echo -e "    1) .devops.yml (racine du repo), format plat :"
+    echo -e "         dev_branch: develop"
+    echo -e "         staging_branch: staging"
+    echo -e "         main_branch: main"
+    echo -e "         prod_branch: prod"
+    echo -e "         feature_prefix: feature/"
+    echo -e "    2) Variables d'env : BRANCH_DEV, BRANCH_STAGING, BRANCH_MAIN, BRANCH_PROD, FEATURE_PREFIX"
+    echo -e "    3) Flags CLI : --branch-dev, --branch-staging, --branch-main, --branch-prod,"
+    echo -e "                   --feature-prefix, --config <fichier.yml>"
+    echo -e "    Ex. : git-deploy --branch-dev develop --branches"
     echo ""
     echo -e "${COLOR_BOLD}SÉCURITÉ:${COLOR_RESET}"
     echo -e "    ✓ Vérification du working tree propre"
@@ -3020,6 +3114,22 @@ main() {
     # Notifier si une mise à jour du framework est disponible (throttlé, non fatal)
     command -v devops_check_updates_auto >/dev/null 2>&1 && devops_check_updates_auto || true
 
+    # Extraire d'abord les flags de configuration des branches (précédence max).
+    # Les autres arguments sont conservés pour le dispatch ci-dessous.
+    local positional=()
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --branch-dev)     FLAG_BRANCH_DEV="${2:-}"; shift 2 ;;
+            --branch-staging) FLAG_BRANCH_STAGING="${2:-}"; shift 2 ;;
+            --branch-main)    FLAG_BRANCH_MAIN="${2:-}"; shift 2 ;;
+            --branch-prod)    FLAG_BRANCH_PROD="${2:-}"; shift 2 ;;
+            --feature-prefix) FLAG_FEATURE_PREFIX="${2:-}"; shift 2 ;;
+            --config)         DEVOPS_CONFIG_FILE="${2:-}"; shift 2 ;;
+            *)                positional+=("$1"); shift ;;
+        esac
+    done
+    set -- ${positional[@]+"${positional[@]}"}
+
     # Traiter les arguments qui n'ont pas besoin d'un repo Git
     case "${1:-}" in
         --help|-h)
@@ -3029,18 +3139,21 @@ main() {
         --status|-s)
             # Vérifier qu'on est dans un repo Git
             check_git_repo
+            configure_branches
             show_status
             exit 0
             ;;
         --branches|-b)
             # Vérifier qu'on est dans un repo Git
             check_git_repo
+            configure_branches
             show_branches_status
             exit 0
             ;;
         "")
             # Vérifier qu'on est dans un repo Git
             check_git_repo
+            configure_branches
             interactive_mode
             ;;
         *)

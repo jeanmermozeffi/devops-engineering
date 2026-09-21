@@ -1,0 +1,169 @@
+# =============================================================================
+# pg-admin.sh — Fichier de configuration — EXEMPLE
+# =============================================================================
+#
+# UTILISATION
+# -----------
+# 1. Copier ce fichier :
+#      cp pg-config.conf.example pg-config.conf
+#
+# 2. Remplir les valeurs pour votre environnement
+#
+# 3. Sécuriser le fichier (OBLIGATOIRE — contient des secrets) :
+#      chmod 600 pg-config.conf
+#
+# NE PAS COMMITTER pg-config.conf  → déjà dans .gitignore
+#
+# =============================================================================
+# PROFILS MULTIPLES (DEV / STAGING / PROD / VPS)
+# =============================================================================
+#
+# Le script supporte plusieurs fichiers de config.
+# Il suffit de les nommer différemment et de pointer dessus :
+#
+#   pg-config.dev.conf      → base locale de développement
+#   pg-config.staging.conf  → base staging (VPS)
+#   pg-config.prod.conf     → base production
+#
+# Pour utiliser un profil spécifique :
+#
+#   PG_CONFIG_FILE=./pg-config.staging.conf ./pg-admin.sh db list
+#   PG_CONFIG_FILE=./pg-config.prod.conf    ./pg-admin.sh perm audit db_analytics_oscrum
+#
+# Ou définir un alias dans votre shell :
+#
+#   alias pg-staging="PG_CONFIG_FILE=~/scripts/pg-config.staging.conf ~/scripts/pg-admin.sh"
+#   alias pg-prod="PG_CONFIG_FILE=~/scripts/pg-config.prod.conf ~/scripts/pg-admin.sh"
+#
+# =============================================================================
+# CONNEXION POSTGRESQL
+# =============================================================================
+
+# Adresse du serveur PostgreSQL
+# - "localhost" si PostgreSQL est sur la même machine
+# - IP ou hostname si distant (ex: 203.0.113.10)
+PG_HOST="localhost"
+
+# Port PostgreSQL (défaut: 5432)
+# Adapter si vous utilisez un port personnalisé (ex: 5435 dans Docker)
+PG_PORT="5432"
+
+# Utilisateur administrateur PostgreSQL
+# Doit avoir les droits CREATEROLE et CREATEDB pour les opérations RBAC
+PG_ADMIN_USER="admin_analytics_oscrum"
+
+# Mot de passe de l'utilisateur admin
+# Le script stocke ce secret dans un fichier temporaire ~/.pgpass (chmod 600)
+# et nettoie automatiquement à la fin — jamais exposé dans `ps aux`
+PG_ADMIN_PASSWORD="votre_mot_de_passe_ici"
+
+# Base de données par défaut (utilisée pour les commandes sans base explicite)
+PG_DEFAULT_DB="db_analytics_oscrum"
+
+# =============================================================================
+# MODE DE CONNEXION
+# =============================================================================
+#
+# "local"  → Le script utilise psql installé localement pour se connecter
+#             à PostgreSQL (local ou distant via PG_HOST/PG_PORT)
+#             Nécessite : brew install postgresql  (macOS)
+#                         apt install postgresql-client  (Ubuntu)
+#
+# "docker" → Le script exécute psql via `docker exec` dans un conteneur.
+#             Idéal sur un VPS où psql n'est pas installé en local mais où
+#             PostgreSQL tourne dans Docker.
+#             Nécessite : docker installé + DOCKER_CONTAINER configuré
+#
+# "ssh"    → Le script se connecte d'abord en SSH au serveur,
+#             puis exécute psql à distance.
+#             Avantage : pas besoin de psql en local, ni d'ouvrir le port PG.
+#             Nécessite : accès SSH au serveur
+#
+USE_SSH="local"
+
+# =============================================================================
+# CONFIGURATION DOCKER (uniquement si USE_SSH="docker")
+# =============================================================================
+
+# Nom ou ID du conteneur Docker contenant PostgreSQL
+# Exemple : docker ps → copier la colonne NAMES
+DOCKER_CONTAINER=""
+
+# =============================================================================
+# CONFIGURATION SSH (uniquement si USE_SSH="ssh")
+# =============================================================================
+
+# Hostname ou IP du serveur SSH
+SSH_HOST=""
+
+# Port SSH (défaut: 22)
+SSH_PORT="22"
+
+# Utilisateur SSH
+SSH_USER="root"
+
+# Chemin vers la clé privée SSH (laisser vide pour authentification par mot de passe)
+# Recommandé : utiliser une clé SSH plutôt qu'un mot de passe
+SSH_KEY="~/.ssh/id_rsa"
+
+# =============================================================================
+# EXEMPLES DE CONFIGURATIONS TYPES
+# =============================================================================
+#
+# --- Exemple 1 : VPS — PostgreSQL dans Docker, pas de psql local ---
+#     Cas d'usage : le script tourne sur le même VPS que le conteneur PG.
+#     `docker exec` remplace psql local.
+#
+# PG_HOST="localhost"
+# PG_PORT="5435"
+# PG_ADMIN_USER=""
+# PG_ADMIN_PASSWORD=""
+# PG_DEFAULT_DB=""
+# USE_SSH="docker"
+# DOCKER_CONTAINER=""
+# SSH_HOST=""
+# SSH_PORT="22"
+# SSH_USER=""
+# SSH_KEY=""
+#
+# --- Exemple 2 : Base locale Docker (développement, psql installé) ---
+#
+# PG_HOST="localhost"
+# PG_PORT="5435"
+# PG_ADMIN_USER="admin_analytics_oscrum"
+# PG_ADMIN_PASSWORD=""
+# PG_DEFAULT_DB="db_analytics_oscrum"
+# USE_SSH="local"
+# DOCKER_CONTAINER=""
+# SSH_HOST=""
+# SSH_PORT="22"
+# SSH_USER=""
+# SSH_KEY=""
+#
+# --- Exemple 2 : VPS distant via psql local (port ouvert) ---
+#
+# PG_HOST="203.0.113.10"
+# PG_PORT="5435"
+# PG_ADMIN_USER=""
+# PG_ADMIN_PASSWORD=""
+# PG_DEFAULT_DB="db_analytics_oscrum"
+# USE_SSH="local"
+# SSH_HOST=""
+# SSH_PORT="22"
+# SSH_USER=""
+# SSH_KEY=""
+#
+# --- Exemple 3 : VPS distant via SSH (port PG non ouvert) ---
+#
+# PG_HOST="localhost"    ← localhost VU DEPUIS le serveur SSH
+# PG_PORT="5435"
+# PG_ADMIN_USER=""
+# PG_ADMIN_PASSWORD=""
+# PG_DEFAULT_DB=""
+# USE_SSH="ssh"
+# SSH_HOST="203.0.113.10"
+# SSH_PORT="22"
+# SSH_USER="deploy"
+# SSH_KEY="~/.ssh/id_rsa_example"
+#
+# =============================================================================

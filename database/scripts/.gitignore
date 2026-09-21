@@ -1,0 +1,18 @@
+# Configs réelles (jamais committées) — seuls les .example le sont
+pg-config.conf
+pg-config.dev.conf
+pg-config.staging.conf
+pg-config.prod.conf
+pg-config.*.conf
+servers.conf
+!*.example
+
+# Artefacts d'exécution
+.credentials/
+logs/
+backups/
+
+# GitOps : manifeste réel ignoré, exemple versionné
+desired/state.conf
+desired/state.exported.conf
+!desired/state.conf.example

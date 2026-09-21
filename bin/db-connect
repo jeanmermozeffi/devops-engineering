@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Wrapper — le code réel est dans database/scripts/connect.sh
+#
+# connect.sh calcule son SCRIPT_DIR sans résoudre les symlinks et exige un
+# pg-admin.sh voisin ; on passe donc par ce wrapper (cf. bin/pg-admin).
+set -euo pipefail
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+exec "$SCRIPT_DIR/../database/scripts/connect.sh" "$@"
