@@ -28,7 +28,22 @@ set -Eeuo pipefail
 readonly SCRIPT_VERSION="3.0"
 readonly SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${PG_CONFIG_FILE:-${SCRIPT_DIR}/pg-config.conf}"
+
+# Dossier de config stable (hors du clone managed). Repli sur le dossier du
+# script pour un usage local/checkout. Ordre de résolution par fichier :
+#   1) $DEVOPS_CONFIG_HOME/<f>   (~/.config/devops par défaut)
+#   2) $SCRIPT_DIR/<f>
+readonly DEVOPS_CONFIG_HOME="${DEVOPS_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/devops}"
+_resolve_conf() {
+    local f="$1"
+    if [ -f "$DEVOPS_CONFIG_HOME/$f" ]; then
+        printf '%s' "$DEVOPS_CONFIG_HOME/$f"
+    else
+        printf '%s' "$SCRIPT_DIR/$f"
+    fi
+}
+
+CONFIG_FILE="${PG_CONFIG_FILE:-$(_resolve_conf pg-config.conf)}"
 readonly LOG_DIR="${SCRIPT_DIR}/logs"
 readonly CREDS_DIR="${SCRIPT_DIR}/.credentials"
 
@@ -370,7 +385,7 @@ CONFEOF
 # du serveur sélectionné, qui sera lu ensuite par load_config().
 
 _select_server_from_conf() {
-    local servers_file="${SCRIPT_DIR}/servers.conf"
+    local servers_file="${SERVERS_CONF_FILE:-$(_resolve_conf servers.conf)}"
     [[ ! -f "$servers_file" ]] && return 0
 
     # --- Lecture des sections (compatible bash 3 — pas de declare -A) ---
