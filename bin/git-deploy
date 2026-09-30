@@ -26,6 +26,16 @@
 
 set -e  # Arrêter en cas d'erreur
 
+# ── Anti-blocage des opérations réseau git ───────────────────────────────────
+# Évite que fetch/push/pull restent bloqués indéfiniment quand le remote est
+# injoignable ou demande des identifiants :
+#   - GIT_TERMINAL_PROMPT=0 : git échoue au lieu de demander user/mot de passe.
+#   - ConnectTimeout SSH : borne la connexion (défaut ssh très long).
+# On respecte un GIT_SSH_COMMAND déjà défini par l'utilisateur.
+export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
+: "${GIT_SSH_COMMAND:=ssh -o ConnectTimeout=10}"
+export GIT_SSH_COMMAND
+
 # ── Bibliothèque partagée de notification de mise à jour (best-effort) ───────
 # Résout les symlinks pour retrouver le vrai dossier bin/ du framework.
 __gd_sp="${BASH_SOURCE[0]}"
