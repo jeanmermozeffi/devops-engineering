@@ -965,7 +965,15 @@ schema_drop() {
 # =============================================================================
 
 user_list() {
-    log_header "UTILISATEURS"
+    # Avec un argument base -> liste ciblée sur cette base ; sinon liste globale.
+    local dbname="${1:-}"
+    if [[ -n "$dbname" ]]; then
+        user_list_by_db "$dbname"
+        return
+    fi
+
+    log_header "UTILISATEURS (cluster)"
+    log_info "Rôles globaux au cluster. Pour les users d'une base : user list <db>."
     execute_sql "
 SELECT
     rolname                                           AS \"Utilisateur\",
@@ -983,6 +991,87 @@ SELECT
 FROM pg_roles
 WHERE rolname NOT LIKE 'pg_%'
 ORDER BY rolcanlogin DESC, rolname;"
+}
+
+# Liste les login-roles ayant un lien réel avec une base : propriétaire, ou
+# privilèges internes (USAGE schéma / lecture table). La colonne CONNECT est
+# indicative (PUBLIC a CONNECT par défaut) — le filtre se base sur les droits réels.
+user_list_by_db() {
+    local dbname="$1"
+    validate_identifier "$dbname" "nom de base" || return 1
+    _db_exists "$dbname" || { log_error "Base introuvable: $dbname"; return 1; }
+
+    log_header "UTILISATEURS LIÉS À LA BASE: $dbname"
+    log_info "Propriétaire + rôles ayant des privilèges dans '$dbname' (CONNECT indicatif : PUBLIC par défaut)."
+    local db_lit; db_lit=$(pg_escape_literal "$dbname")
+    execute_sql "
+WITH logins AS (
+    SELECT rolname, rolsuper FROM pg_roles
+    WHERE rolcanlogin AND rolname NOT LIKE 'pg_%'
+),
+owner AS (
+    SELECT pg_get_userbyid(datdba) AS rolname
+    FROM pg_database WHERE datname = '$db_lit'
+),
+schemas AS (
+    SELECT nspname FROM pg_namespace
+    WHERE nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+),
+per_user AS (
+    SELECT l.rolname, l.rolsuper,
+           (o.rolname IS NOT NULL) AS is_owner,
+           has_database_privilege(l.rolname, '$db_lit', 'CONNECT') AS can_connect,
+           (SELECT count(*) FROM schemas s
+              WHERE has_schema_privilege(l.rolname, s.nspname, 'USAGE')) AS usage_cnt,
+           (SELECT count(*) FROM pg_tables t
+              WHERE t.schemaname IN (SELECT nspname FROM schemas)
+                AND has_table_privilege(l.rolname,
+                      quote_ident(t.schemaname)||'.'||quote_ident(t.tablename), 'SELECT')) AS tbl_cnt
+    FROM logins l
+    LEFT JOIN owner o ON o.rolname = l.rolname
+)
+SELECT rolname AS \"Utilisateur\",
+       CASE WHEN rolsuper THEN 'Superuser' ELSE 'Normal' END AS \"Type\",
+       CASE WHEN is_owner THEN '✓' ELSE '' END               AS \"Owner\",
+       CASE WHEN can_connect THEN '✓' ELSE '✗' END           AS \"CONNECT\",
+       usage_cnt                                             AS \"Schémas (USAGE)\",
+       tbl_cnt                                               AS \"Tables lisibles\"
+FROM per_user
+WHERE is_owner OR usage_cnt > 0 OR tbl_cnt > 0
+ORDER BY is_owner DESC, rolname;" "$dbname"
+}
+
+# Vue par utilisateur : bases possédées, bases accessibles (CONNECT), rôles hérités.
+user_dbs() {
+    local username="$1"
+    validate_identifier "$username" "nom d'utilisateur" || return 1
+    _role_exists "$username" || { log_error "Utilisateur introuvable: $username"; return 1; }
+    local u_lit; u_lit=$(pg_escape_literal "$username")
+
+    log_header "BASES & RÔLES DE: $username"
+    echo -e "\n${WHITE}── Bases possédées ──${NC}"
+    execute_sql "
+SELECT datname AS \"Base possédée\"
+FROM pg_database
+WHERE pg_get_userbyid(datdba) = '$u_lit' AND NOT datistemplate
+ORDER BY datname;"
+
+    echo -e "\n${WHITE}── Bases accessibles (CONNECT) ──${NC}"
+    execute_sql "
+SELECT datname AS \"Base\",
+       CASE WHEN has_database_privilege('$u_lit', datname, 'CONNECT') THEN '✓' ELSE '✗' END AS \"CONNECT\"
+FROM pg_database
+WHERE NOT datistemplate AND datname <> 'template0'
+ORDER BY datname;"
+
+    echo -e "\n${WHITE}── Rôles hérités ──${NC}"
+    execute_sql "
+SELECT r.rolname AS \"Rôle\"
+FROM pg_auth_members m
+JOIN pg_roles r ON r.oid = m.roleid
+JOIN pg_roles u ON u.oid = m.member
+WHERE u.rolname = '$u_lit'
+ORDER BY r.rolname;"
 }
 
 user_create() {
@@ -2167,6 +2256,8 @@ menu_users() {
         echo -e "  ${CYAN}8${NC}  Voir les rôles d'un utilisateur"
         echo -e "  ${CYAN}9${NC}  Limiter les connexions (MaxConn)  ${WHITE}[multi]${NC}"
         echo -e "  ${CYAN}10${NC} Rotation des mots de passe échus  ${WHITE}(sécurité)${NC}"
+        echo -e "  ${CYAN}11${NC} Lister les utilisateurs ${WHITE}d'une base${NC}"
+        echo -e "  ${CYAN}12${NC} Infos d'un utilisateur ${WHITE}(bases + rôles)${NC}"
         echo ""; echo -e "  ${YELLOW}0${NC}  ← Retour"; echo ""
         local c; c=$(_choice)
         case "$c" in
@@ -2216,6 +2307,12 @@ menu_users() {
                 local days
                 read -r -p "  Renouveler les mdp plus vieux que (jours, défaut 90) : " days
                 security_rotate_due "${days:-90}"; _press_enter ;;
+            11)
+                local db; db=$(pick_database "Base")
+                [[ -n "$db" ]] && user_list_by_db "$db"; _press_enter ;;
+            12)
+                local un; un=$(pick_user "Utilisateur")
+                [[ -n "$un" ]] && user_dbs "$un"; _press_enter ;;
             0) return ;;
         esac
     done
@@ -2687,7 +2784,8 @@ ${CYAN}SCHÉMAS:${NC}
   schema drop   <db> <schema> [cascade]
 
 ${CYAN}UTILISATEURS:${NC}
-  user list
+  user list [db]                  # global (cluster) ou, avec [db], users liés à la base
+  user dbs <user>                 # bases possédées/accessibles + rôles hérités d'un user
   user create <user> [password] [profile]
   user drop   <user>
   user passwd <user> [newpassword]
@@ -2872,14 +2970,15 @@ main() {
         user)
             local sub="${1:-list}"; shift || true
             case "$sub" in
-                list)   user_list ;;
+                list)   user_list "$@" ;;
+                dbs)    user_dbs "$@" ;;
                 create) user_create "$@" ;;
                 drop)   user_drop "$@" ;;
                 passwd)     user_change_password "$@" ;;
                 lock)       user_lock "$@" ;;
                 unlock)     user_unlock "$@" ;;
                 conn-limit) user_set_conn_limit "$@" ;;
-                *)          log_error "Sous-commande inconnue: user $sub"; exit 1 ;;
+                *)          log_error "Sous-commande inconnue: user $sub (list [db]|dbs <user>|create|drop|passwd|lock|unlock|conn-limit)"; exit 1 ;;
             esac ;;
         rbac)
             local sub="${1:-roles}"; shift || true
