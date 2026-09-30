@@ -1076,6 +1076,10 @@ cmd_interactive() {
     export PROJECT_ROOT="$CURRENT_PROJECT_DIR"
     export ENV="${ENV:-dev}"
 
+    # Mode interactif : une action en échec (script worker, commande git/docker…)
+    # ne doit pas faire sortir le menu via errexit — on revient toujours au menu.
+    set +e
+
     while true; do
         clear
         echo -e "${CYAN}╔════════════════════════════════════════════════════════╗${NC}"

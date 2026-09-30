@@ -2816,6 +2816,10 @@ main() {
 
     # Mode interactif si aucun argument
     if [[ $# -eq 0 ]]; then
+        # En mode interactif, une action qui échoue (ex. clé absente) ne doit PAS
+        # faire sortir le script : on désactive errexit pour toujours revenir au
+        # menu. Le chemin CLI (non-interactif) conserve `set -e` (fail-fast).
+        set +e
         if ! check_connection 2>/dev/null; then
             log_warn "Connexion échouée — le serveur est peut-être inaccessible"
             confirm "Reconfigurer la connexion manuellement ?" && _configure_connection
