@@ -2064,6 +2064,7 @@ menu_main() {
         echo -e "  ${CYAN}8${NC}  Monitoring"
         echo -e "  ${CYAN}9${NC}  Paramètres & Connexion"
         echo -e "  ${CYAN}10${NC} GitOps / État déclaré"
+        echo -e "  ${CYAN}11${NC} Chiffrement & Credentials"
         echo ""
         echo -e "  ${RED}0${NC}  Quitter"
         echo ""
@@ -2074,6 +2075,7 @@ menu_main() {
             5) menu_permissions ;; 6) menu_audit ;;
             7) menu_backup ;;    8) menu_monitoring ;;
             9) menu_settings ;;  10) menu_gitops ;;
+            11) menu_credentials ;;
             0) log_info "À bientôt !"; exit 0 ;;
             *) log_error "Choix invalide: '$c'" ;;
         esac
@@ -2529,6 +2531,48 @@ menu_settings() {
                log_info "Dry-run → $DRY_RUN" ;;
             4) [[ "$VERBOSE"  == true ]] && VERBOSE=false  || VERBOSE=true
                log_info "Verbose → $VERBOSE" ;;
+            0) return ;;
+        esac
+    done
+}
+
+menu_credentials() {
+    while true; do
+        _banner
+        echo -e "  ${WHITE}${BOLD}11 › CHIFFREMENT & CREDENTIALS${NC}"; echo ""
+        if [[ -f "$DEVOPS_KEY_FILE" ]]; then
+            echo -e "  ${WHITE}Clé      :${NC} ${GREEN}présente${NC} (${DEVOPS_KEY_FILE})"
+        else
+            echo -e "  ${WHITE}Clé      :${NC} ${YELLOW}absente${NC} — secrets écrits en clair"
+        fi
+        echo -e "  ${WHITE}Dossier  :${NC} ${CYAN}${CREDS_DIR}${NC}"
+        echo ""
+        echo -e "  ${WHITE}— Clé de chiffrement —${NC}"
+        echo -e "  ${CYAN}1${NC}  État de la clé"
+        echo -e "  ${CYAN}2${NC}  Créer la clé"
+        echo -e "  ${CYAN}3${NC}  Renouveler la clé (rotate + re-chiffrement)"
+        echo -e "  ${CYAN}4${NC}  Afficher la clé"
+        echo -e "  ${CYAN}5${NC}  Supprimer la clé  ${RED}[secrets chiffrés perdus]${NC}"
+        echo ""
+        echo -e "  ${WHITE}— Credentials —${NC}"
+        echo -e "  ${CYAN}6${NC}  Lister les credentials"
+        echo -e "  ${CYAN}7${NC}  Afficher un credential (déchiffré)"
+        echo ""; echo -e "  ${YELLOW}0${NC}  ← Retour"; echo ""
+        local c; c=$(_choice)
+        case "$c" in
+            1) key_status; _press_enter ;;
+            2) key_create; _press_enter ;;
+            3) key_rotate; _press_enter ;;
+            4) key_show; _press_enter ;;
+            5) key_delete; _press_enter ;;
+            6)
+                local db; db=$(pick_database "Base (vide = toutes)" 2>/dev/null || true)
+                cred_list "$db"; _press_enter ;;
+            7)
+                local db us
+                db=$(pick_database "Base")
+                read -r -p "  Utilisateur : " us
+                cred_show "$db" "$us"; _press_enter ;;
             0) return ;;
         esac
     done
