@@ -52,6 +52,10 @@ readonly DEVOPS_KEY_FILE="${DEVOPS_KEY_FILE:-${DEVOPS_CONFIG_HOME}/.enckey}"
 # Chiffrement auto des secrets si une clé existe ; --plaintext force le clair.
 NO_ENCRYPT="${NO_ENCRYPT:-false}"
 
+# Borne le temps de connexion psql : évite qu'une base injoignable ne bloque
+# indéfiniment l'outil (menus, pickers, etc.). Surchargeable par l'utilisateur.
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
+
 # Couleurs
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
@@ -2536,6 +2540,18 @@ menu_settings() {
     done
 }
 
+# Choix d'une base parmi les dossiers de credentials LOCAUX (aucune connexion DB).
+pick_cred_db() {
+    local prompt="${1:-Base}"
+    local -a items=()
+    if [[ -d "$CREDS_DIR" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && items+=("$(basename "$line")")
+        done < <(find "$CREDS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    fi
+    _pick "Bases avec credentials" "$prompt" "${items[@]+"${items[@]}"}"
+}
+
 menu_credentials() {
     while true; do
         _banner
@@ -2566,11 +2582,10 @@ menu_credentials() {
             4) key_show; _press_enter ;;
             5) key_delete; _press_enter ;;
             6)
-                local db; db=$(pick_database "Base (vide = toutes)" 2>/dev/null || true)
-                cred_list "$db"; _press_enter ;;
+                cred_list; _press_enter ;;
             7)
                 local db us
-                db=$(pick_database "Base")
+                db=$(pick_cred_db "Base")
                 read -r -p "  Utilisateur : " us
                 cred_show "$db" "$us"; _press_enter ;;
             0) return ;;
