@@ -3014,6 +3014,9 @@ show_menu() {
 }
 
 interactive_mode() {
+    # En mode interactif, une action qui échoue (git en erreur, opération annulée…)
+    # ne doit PAS faire sortir le script via errexit : on revient toujours au menu.
+    set +e
     while true; do
         show_menu
 
