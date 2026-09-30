@@ -1042,11 +1042,17 @@ ORDER BY is_owner DESC, rolname;" "$dbname"
 }
 
 # Vue par utilisateur : bases possédées, bases accessibles (CONNECT), rôles hérités.
+# Avec un 2e argument <db> -> détail fin des droits dans cette base.
 user_dbs() {
-    local username="$1"
+    local username="$1" dbname="${2:-}"
     validate_identifier "$username" "nom d'utilisateur" || return 1
     _role_exists "$username" || { log_error "Utilisateur introuvable: $username"; return 1; }
     local u_lit; u_lit=$(pg_escape_literal "$username")
+
+    if [[ -n "$dbname" ]]; then
+        user_dbs_detail "$username" "$dbname"
+        return
+    fi
 
     log_header "BASES & RÔLES DE: $username"
     echo -e "\n${WHITE}── Bases possédées ──${NC}"
@@ -1072,6 +1078,68 @@ JOIN pg_roles r ON r.oid = m.roleid
 JOIN pg_roles u ON u.oid = m.member
 WHERE u.rolname = '$u_lit'
 ORDER BY r.rolname;"
+
+    log_info "Détail fin des droits dans une base : user dbs $username <db>"
+}
+
+# Détail fin des droits effectifs d'un utilisateur DANS une base précise :
+# base (CONNECT/CREATE), schémas (USAGE/CREATE), tables (7 privilèges), séquences.
+# has_*_privilege tient compte de l'héritage de rôles.
+user_dbs_detail() {
+    local username="$1" dbname="$2" u_lit db_lit
+    validate_identifier "$dbname" "nom de base" || return 1
+    _db_exists "$dbname" || { log_error "Base introuvable: $dbname"; return 1; }
+    u_lit=$(pg_escape_literal "$username")
+    db_lit=$(pg_escape_literal "$dbname")
+
+    log_header "DROITS FINS DE '$username' DANS: $dbname"
+
+    echo -e "\n${WHITE}── Base ──${NC}"
+    execute_sql "
+SELECT '$dbname' AS \"Base\",
+       CASE WHEN has_database_privilege('$u_lit', '$db_lit', 'CONNECT') THEN '✓' ELSE '✗' END AS \"CONNECT\",
+       CASE WHEN has_database_privilege('$u_lit', '$db_lit', 'CREATE')  THEN '✓' ELSE '✗' END AS \"CREATE\",
+       CASE WHEN pg_get_userbyid(datdba) = '$u_lit' THEN '✓' ELSE '' END AS \"Owner\"
+FROM pg_database WHERE datname = '$db_lit';"
+
+    echo -e "\n${WHITE}── Schémas (USAGE / CREATE) ──${NC}"
+    execute_sql "
+SELECT n.nspname AS \"Schéma\",
+       CASE WHEN has_schema_privilege('$u_lit', n.nspname, 'USAGE')  THEN '✓' ELSE '·' END AS \"USAGE\",
+       CASE WHEN has_schema_privilege('$u_lit', n.nspname, 'CREATE') THEN '✓' ELSE '·' END AS \"CREATE\"
+FROM pg_namespace n
+WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+ORDER BY n.nspname;" "$dbname"
+
+    echo -e "\n${WHITE}── Tables & privilèges effectifs ──${NC}"
+    execute_sql "
+SELECT t.schemaname AS \"Schéma\", t.tablename AS \"Table\",
+       array_to_string(ARRAY(
+           SELECT p FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+           WHERE has_table_privilege('$u_lit', quote_ident(t.schemaname)||'.'||quote_ident(t.tablename), p)
+       ), ', ') AS \"Privilèges\"
+FROM pg_tables t
+WHERE t.schemaname NOT IN ('pg_catalog','information_schema','pg_toast')
+  AND EXISTS (
+      SELECT 1 FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p
+      WHERE has_table_privilege('$u_lit', quote_ident(t.schemaname)||'.'||quote_ident(t.tablename), p)
+  )
+ORDER BY t.schemaname, t.tablename;" "$dbname"
+
+    echo -e "\n${WHITE}── Séquences & privilèges effectifs ──${NC}"
+    execute_sql "
+SELECT sequence_schema AS \"Schéma\", sequence_name AS \"Séquence\",
+       array_to_string(ARRAY(
+           SELECT p FROM unnest(ARRAY['USAGE','SELECT','UPDATE']) p
+           WHERE has_sequence_privilege('$u_lit', quote_ident(sequence_schema)||'.'||quote_ident(sequence_name), p)
+       ), ', ') AS \"Privilèges\"
+FROM information_schema.sequences
+WHERE sequence_schema NOT IN ('pg_catalog','information_schema')
+  AND EXISTS (
+      SELECT 1 FROM unnest(ARRAY['USAGE','SELECT','UPDATE']) p
+      WHERE has_sequence_privilege('$u_lit', quote_ident(sequence_schema)||'.'||quote_ident(sequence_name), p)
+  )
+ORDER BY sequence_schema, sequence_name;" "$dbname"
 }
 
 user_create() {
@@ -2258,6 +2326,7 @@ menu_users() {
         echo -e "  ${CYAN}10${NC} Rotation des mots de passe échus  ${WHITE}(sécurité)${NC}"
         echo -e "  ${CYAN}11${NC} Lister les utilisateurs ${WHITE}d'une base${NC}"
         echo -e "  ${CYAN}12${NC} Infos d'un utilisateur ${WHITE}(bases + rôles)${NC}"
+        echo -e "  ${CYAN}13${NC} Détail fin des droits d'un user ${WHITE}dans une base${NC}"
         echo ""; echo -e "  ${YELLOW}0${NC}  ← Retour"; echo ""
         local c; c=$(_choice)
         case "$c" in
@@ -2313,6 +2382,11 @@ menu_users() {
             12)
                 local un; un=$(pick_user "Utilisateur")
                 [[ -n "$un" ]] && user_dbs "$un"; _press_enter ;;
+            13)
+                local un db
+                un=$(pick_user "Utilisateur")
+                db=$(pick_database "Base")
+                [[ -n "$un" && -n "$db" ]] && user_dbs "$un" "$db"; _press_enter ;;
             0) return ;;
         esac
     done
@@ -2785,7 +2859,7 @@ ${CYAN}SCHÉMAS:${NC}
 
 ${CYAN}UTILISATEURS:${NC}
   user list [db]                  # global (cluster) ou, avec [db], users liés à la base
-  user dbs <user>                 # bases possédées/accessibles + rôles hérités d'un user
+  user dbs <user> [db]            # vue user (bases/rôles) ; avec [db] = droits fins (schémas/tables/séquences)
   user create <user> [password] [profile]
   user drop   <user>
   user passwd <user> [newpassword]
