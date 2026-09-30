@@ -2830,8 +2830,9 @@ main() {
 
     local cmd="$1"; shift
 
-    # Vérification connexion pour toutes les commandes sauf help/config
-    if [[ "$cmd" != "help" && "$cmd" != "config" && "$DRY_RUN" != "true" ]]; then
+    # Vérification connexion sauf pour les commandes purement locales
+    # (help/config, et key/cred qui n'opèrent que sur des fichiers locaux).
+    if [[ "$cmd" != "help" && "$cmd" != "config" && "$cmd" != "key" && "$cmd" != "cred" && "$DRY_RUN" != "true" ]]; then
         check_connection || { log_error "Connexion requise. Lancez: ./${SCRIPT_NAME} config"; exit 1; }
     fi
 
