@@ -52,6 +52,28 @@ cp scripts/pg-config.conf.example ~/.config/devops/pg-config.conf && chmod 600 ~
 > ⚠️ Ne jamais committer les fichiers réels ni les dossiers `logs/`, `backups/`,
 > `.credentials/` — déjà couverts par `.gitignore`.
 
+## Credentials & chiffrement
+
+Les mots de passe générés (`user create`, `db create <db> <owner>`, `security rotate`)
+sont écrits sous **`~/.config/devops/credentials/<db>/`** (hors du clone), un dossier
+par base. Ils sont **chiffrés automatiquement** (openssl AES-256) dès qu'une clé
+existe ; sinon en clair.
+
+```bash
+pg-admin key create           # crée ~/.config/devops/.enckey (à sauvegarder !)
+pg-admin key status           # état de la clé + nb de credentials chiffrés
+pg-admin key rotate           # renouvelle la clé et re-chiffre les credentials
+pg-admin key delete           # supprime la clé (les secrets chiffrés deviennent illisibles)
+
+pg-admin cred list [db]              # liste les credentials (clair/chiffré)
+pg-admin cred show <db> <user>       # affiche le credential déchiffré (+ URI)
+pg-admin cred path                   # chemin du dossier des credentials
+```
+
+- `--plaintext` force l'écriture en clair même si une clé existe.
+- La carte de credentials affiche la **vraie base** (`Database:` / URI), plus `postgres`.
+- ⚠️ **Sauvegardez la clé** `~/.config/devops/.enckey` : sans elle, les secrets chiffrés sont irrécupérables.
+
 ## Documentation
 
 - `scripts/pg-admin.md`, `scripts/pg-admin-ext.md` — référence des commandes.

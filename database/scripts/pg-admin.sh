@@ -45,7 +45,12 @@ _resolve_conf() {
 
 CONFIG_FILE="${PG_CONFIG_FILE:-$(_resolve_conf pg-config.conf)}"
 readonly LOG_DIR="${SCRIPT_DIR}/logs"
-readonly CREDS_DIR="${SCRIPT_DIR}/.credentials"
+# Credentials & clé de chiffrement : hors du clone managé, sous ~/.config/devops
+# (organisés par base : $CREDS_DIR/<db>/). Surchargeable via variables d'env.
+readonly CREDS_DIR="${DEVOPS_CREDS_DIR:-${DEVOPS_CONFIG_HOME}/credentials}"
+readonly DEVOPS_KEY_FILE="${DEVOPS_KEY_FILE:-${DEVOPS_CONFIG_HOME}/.enckey}"
+# Chiffrement auto des secrets si une clé existe ; --plaintext force le clair.
+NO_ENCRYPT="${NO_ENCRYPT:-false}"
 
 # Couleurs
 readonly RED='\033[0;31m'
@@ -287,6 +292,25 @@ execute_sql_list() {
     else
         printf '%s\n' "$sql" | _psql_local "$database" -t -A 2>/dev/null || true
     fi
+}
+
+# =============================================================================
+# TESTS D'EXISTENCE (parsing fiable via -t -A, pas de dépendance au format aligné)
+# =============================================================================
+
+# Vrai si la requête (qui doit renvoyer "1" quand l'objet existe) retourne 1.
+_row_exists() {
+    local sql="$1" database="${2:-$PG_DEFAULT_DB}" out
+    out=$(execute_sql_list "$sql" "$database" | tr -d '[:space:]')
+    [[ "$out" == "1" ]]
+}
+
+_db_exists() {
+    _row_exists "SELECT 1 FROM pg_database WHERE datname = '$(pg_escape_literal "$1")';"
+}
+
+_role_exists() {
+    _row_exists "SELECT 1 FROM pg_roles WHERE rolname = '$(pg_escape_literal "$1")';"
 }
 
 # =============================================================================
@@ -553,24 +577,215 @@ generate_password() {
     echo
 }
 
+# =============================================================================
+# CHIFFREMENT DES SECRETS (openssl) + CLÉ + CREDENTIALS
+# =============================================================================
+
+_stat_mode() { stat -f '%Sp' "$1" 2>/dev/null || stat -c '%A' "$1" 2>/dev/null || echo '?'; }
+
+# Chiffrement actif : clé présente, openssl dispo, et --plaintext non demandé.
+_enc_active() {
+    [[ "$NO_ENCRYPT" != true ]] && [[ -f "$DEVOPS_KEY_FILE" ]] && command -v openssl >/dev/null 2>&1
+}
+
+# Chiffre $1 -> "ENC[base64]" (repli en clair si indisponible/échec).
+_enc_secret() {
+    local plain="$1" b64
+    if _enc_active; then
+        b64=$(printf '%s' "$plain" | openssl enc -aes-256-cbc -pbkdf2 -salt \
+              -pass "file:$DEVOPS_KEY_FILE" -a 2>/dev/null | tr -d '\n')
+        if [[ -n "$b64" ]]; then printf 'ENC[%s]' "$b64"; return 0; fi
+    fi
+    printf '%s' "$plain"
+}
+
+# Déchiffre "ENC[...]" (ou renvoie tel quel si en clair). Échoue si la clé manque.
+_dec_secret() {
+    local val="$1" b64
+    if [[ "$val" == ENC\[*\] ]]; then
+        [[ -f "$DEVOPS_KEY_FILE" ]] || { log_error "Clé absente ($DEVOPS_KEY_FILE) — déchiffrement impossible"; return 1; }
+        b64="${val#ENC[}"; b64="${b64%]}"
+        printf '%s\n' "$b64" | openssl enc -d -aes-256-cbc -pbkdf2 \
+            -pass "file:$DEVOPS_KEY_FILE" -a 2>/dev/null
+    else
+        printf '%s' "$val"
+    fi
+}
+
 _save_credentials() {
     local username="$1" password="$2" profile="$3"
-    mkdir -p "$CREDS_DIR"
-    chmod 700 "$CREDS_DIR"
-    local cred_file="${CREDS_DIR}/${username}_$(date +%Y%m%d_%H%M%S).txt"
+    local dbname="${4:-$PG_DEFAULT_DB}"
+
+    local cred_dir="${CREDS_DIR}/${dbname}"
+    mkdir -p "$cred_dir"
+    chmod 700 "$CREDS_DIR" "$cred_dir" 2>/dev/null || true
+    local cred_file="${cred_dir}/${username}_$(date +%Y%m%d_%H%M%S).txt"
+
+    local pw_field uri_line enc_note=""
+    if _enc_active; then
+        pw_field="$(_enc_secret "$password")"
+        uri_line="postgresql://${username}:***chiffré***@${PG_HOST}:${PG_PORT}/${dbname}"
+        enc_note="# Mot de passe chiffré (openssl AES-256). URI complète : pg-admin cred show ${dbname} ${username}"
+    else
+        pw_field="$password"
+        uri_line="postgresql://${username}:${password}@${PG_HOST}:${PG_PORT}/${dbname}"
+    fi
+
     cat > "$cred_file" << CREDEOF
 # Credentials générés le $(date)
 # FICHIER SENSIBLE — ne pas committer
+$enc_note
 
 User:     $username
-Password: $password
+Password: $pw_field
 Profile:  $profile
 Host:     $PG_HOST:$PG_PORT
-Database: $PG_DEFAULT_DB
-URI:      postgresql://${username}:${password}@${PG_HOST}:${PG_PORT}/${PG_DEFAULT_DB}
+Database: $dbname
+URI:      $uri_line
 CREDEOF
     chmod 600 "$cred_file"
     log_info "Credentials sauvegardés: $cred_file"
+    if _enc_active; then
+        log_info "  (mot de passe chiffré — 'pg-admin cred show $dbname $username' pour le révéler)"
+    fi
+    return 0
+}
+
+# --- Gestion de la clé de chiffrement ----------------------------------------
+key_create() {
+    mkdir -p "$(dirname "$DEVOPS_KEY_FILE")"
+    if [[ -f "$DEVOPS_KEY_FILE" && "${1:-}" != "--force" ]]; then
+        log_error "Une clé existe déjà : $DEVOPS_KEY_FILE (voir 'key rotate' ou 'key create --force')"
+        return 1
+    fi
+    openssl rand -base64 48 > "$DEVOPS_KEY_FILE"
+    chmod 600 "$DEVOPS_KEY_FILE"
+    log_success "Clé de chiffrement créée : $DEVOPS_KEY_FILE"
+    log_warn "Sauvegardez-la : sans elle, les secrets chiffrés sont irrécupérables."
+}
+
+key_show() {
+    [[ -f "$DEVOPS_KEY_FILE" ]] || { log_error "Aucune clé : $DEVOPS_KEY_FILE"; return 1; }
+    if [[ "${ASSUME_YES:-false}" != true && -t 0 ]]; then
+        local c; read -r -p "  Afficher la clé secrète en clair ? [o/N] : " c </dev/tty
+        [[ "$c" =~ ^[oOyY]$ ]] || { log_info "Annulé"; return 0; }
+    fi
+    cat "$DEVOPS_KEY_FILE"
+}
+
+key_status() {
+    if [[ -f "$DEVOPS_KEY_FILE" ]]; then
+        log_success "Clé présente : $DEVOPS_KEY_FILE ($(_stat_mode "$DEVOPS_KEY_FILE"))"
+    else
+        log_warn "Aucune clé ($DEVOPS_KEY_FILE) — les secrets sont écrits en clair."
+    fi
+    local n; n=$(grep -rl "ENC\[" "$CREDS_DIR" 2>/dev/null | wc -l | tr -d ' ')
+    echo "  Fichiers credentials chiffrés : ${n:-0}"
+    echo "  Dossier credentials           : $CREDS_DIR"
+}
+
+_reencrypt_file() {
+    local file="$1" oldf="$2" newf="$3" tmp line before val after plain b64
+    tmp=$(mktemp)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^(.*)ENC\[([^]]*)\](.*)$ ]]; then
+            before="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"; after="${BASH_REMATCH[3]}"
+            plain=$(printf '%s\n' "$val" | openssl enc -d -aes-256-cbc -pbkdf2 -pass "file:$oldf" -a 2>/dev/null) \
+                || { rm -f "$tmp"; return 1; }
+            b64=$(printf '%s' "$plain" | openssl enc -aes-256-cbc -pbkdf2 -salt -pass "file:$newf" -a 2>/dev/null | tr -d '\n')
+            line="${before}ENC[${b64}]${after}"
+        fi
+        printf '%s\n' "$line" >> "$tmp"
+    done < "$file"
+    mv "$tmp" "$file"; chmod 600 "$file"
+}
+
+key_rotate() {
+    [[ -f "$DEVOPS_KEY_FILE" ]] || { log_error "Aucune clé à renouveler. Utilisez 'key create'."; return 1; }
+    local oldf newf count=0 f
+    oldf=$(mktemp); newf=$(mktemp); chmod 600 "$oldf" "$newf"
+    cp "$DEVOPS_KEY_FILE" "$oldf"
+    openssl rand -base64 48 > "$newf"
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        if _reencrypt_file "$f" "$oldf" "$newf"; then count=$((count+1)); else log_warn "Échec re-chiffrement : $f"; fi
+    done < <(grep -rl "ENC\[" "$CREDS_DIR" 2>/dev/null || true)
+    local backup="${DEVOPS_KEY_FILE}.old.$(date +%s)"
+    cp "$DEVOPS_KEY_FILE" "$backup"; chmod 600 "$backup"
+    cp "$newf" "$DEVOPS_KEY_FILE"; chmod 600 "$DEVOPS_KEY_FILE"
+    rm -f "$oldf" "$newf"
+    log_success "Clé renouvelée. $count fichier(s) re-chiffré(s)."
+    log_warn "Ancienne clé sauvegardée : $backup — supprimez-la après validation."
+}
+
+key_delete() {
+    [[ -f "$DEVOPS_KEY_FILE" ]] || { log_warn "Aucune clé à supprimer."; return 0; }
+    log_warn "Sans la clé, les credentials chiffrés existants seront ILLISIBLES."
+    if [[ "${ASSUME_YES:-false}" != true && -t 0 ]]; then
+        local c; read -r -p "  Supprimer la clé ? [o/N] : " c </dev/tty
+        [[ "$c" =~ ^[oOyY]$ ]] || { log_info "Annulé"; return 0; }
+    fi
+    rm -f "$DEVOPS_KEY_FILE"
+    log_success "Clé supprimée : $DEVOPS_KEY_FILE"
+}
+
+key_manage() {
+    local sub="${1:-status}"; shift || true
+    case "$sub" in
+        create) key_create "$@" ;;
+        show)   key_show ;;
+        status) key_status ;;
+        rotate) key_rotate ;;
+        delete) key_delete ;;
+        *) log_error "Sous-commande inconnue: key $sub (create|show|status|rotate|delete)"; return 1 ;;
+    esac
+}
+
+# --- Consultation des credentials --------------------------------------------
+cred_list() {
+    local db="${1:-}" base="$CREDS_DIR"
+    [[ -n "$db" ]] && base="$CREDS_DIR/$db"
+    [[ -d "$base" ]] || { log_warn "Aucun credential sous $base"; return 0; }
+    log_header "CREDENTIALS (${db:-toutes bases})"
+    local f rel enc
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        rel="${f#"$CREDS_DIR"/}"
+        enc="clair"; grep -q "ENC\[" "$f" 2>/dev/null && enc="chiffré"
+        printf '  %-52s [%s]\n' "$rel" "$enc"
+    done < <(find "$base" -type f -name '*.txt' 2>/dev/null | sort)
+}
+
+cred_show() {
+    local db="$1" user="$2"
+    [[ -n "$db" && -n "$user" ]] || { log_error "Usage: cred show <db> <user>"; return 1; }
+    local dir="$CREDS_DIR/$db" f
+    f=$(find "$dir" -type f -name "${user}_*.txt" 2>/dev/null | sort | tail -n1)
+    [[ -n "$f" && -f "$f" ]] || { log_error "Aucun credential pour '$user' dans la base '$db' ($dir)"; return 1; }
+
+    local pw_enc pw host database
+    pw_enc=$(grep -E '^Password:' "$f" | sed 's/^Password:[[:space:]]*//')
+    host=$(grep -E '^Host:' "$f" | sed 's/^Host:[[:space:]]*//')
+    database=$(grep -E '^Database:' "$f" | sed 's/^Database:[[:space:]]*//')
+    pw=$(_dec_secret "$pw_enc") || return 1
+
+    log_header "CREDENTIAL: $user @ $database"
+    echo "  Fichier  : $f"
+    echo "  User     : $user"
+    echo "  Password : $pw"
+    echo "  Host     : $host"
+    echo "  Database : $database"
+    echo "  URI      : postgresql://${user}:${pw}@${host}/${database}"
+}
+
+cred_manage() {
+    local sub="${1:-list}"; shift || true
+    case "$sub" in
+        list) cred_list "$@" ;;
+        show) cred_show "$@" ;;
+        path) echo "$CREDS_DIR" ;;
+        *) log_error "Sous-commande inconnue: cred $sub (list|show|path)"; return 1 ;;
+    esac
 }
 
 # Pause interactive (appuyer sur Entrée)
@@ -606,20 +821,12 @@ db_create() {
 
     log_header "CRÉATION BASE: $dbname"
 
-    local exists
-    exists=$(execute_sql \
-        "SELECT 1 FROM pg_database WHERE datname = '$(pg_escape_literal "$dbname")';" \
-        2>/dev/null | grep -c "^ 1$" || true)
-    if (( exists > 0 )); then
+    if _db_exists "$dbname"; then
         log_warn "La base '$dbname' existe déjà — aucune action"
         return 0
     fi
 
-    local owner_exists
-    owner_exists=$(execute_sql \
-        "SELECT 1 FROM pg_roles WHERE rolname = '$(pg_escape_literal "$owner")';" \
-        2>/dev/null | grep -c "^ 1$" || true)
-    if (( owner_exists == 0 )); then
+    if ! _role_exists "$owner"; then
         log_warn "Le rôle propriétaire '$owner' n'existe pas"
         if [[ ! -t 0 ]]; then
             log_error "Confirmation requise mais stdin non-interactif — abandon"
@@ -631,7 +838,7 @@ db_create() {
             log_error "Abandon — le rôle '$owner' doit exister avant de créer la base"
             return 1
         fi
-        user_create "$owner" "" "db-owner" || {
+        user_create "$owner" "" "db-owner" "$dbname" || {
             log_error "Échec de la création du rôle '$owner' — abandon"
             return 1
         }
@@ -778,14 +985,11 @@ user_create() {
     local username="$1"
     local password="${2:-}"
     local profile="${3:-analyst}"
+    local dbname="${4:-$PG_DEFAULT_DB}"
 
     validate_identifier "$username" "nom d'utilisateur" || return 1
 
-    local exists
-    exists=$(execute_sql \
-        "SELECT 1 FROM pg_roles WHERE rolname = '$(pg_escape_literal "$username")';" \
-        2>/dev/null | grep -c "^ 1$" || true)
-    if (( exists > 0 )); then
+    if _role_exists "$username"; then
         log_error "L'utilisateur '$username' existe déjà"
         return 1
     fi
@@ -806,7 +1010,7 @@ CREATE USER \"$username\"
          CONNECTION LIMIT -1;"
 
     audit_log "CREATE_USER" "user=$username profile=$profile"
-    _save_credentials "$username" "$password" "$profile"
+    _save_credentials "$username" "$password" "$profile" "$dbname"
 
     if [[ "$auto_generated" == true ]]; then
         log_warn "Mot de passe auto-généré — sauvegardez-le maintenant !"
@@ -2409,6 +2613,7 @@ ${CYAN}OPTIONS:${NC}
   --dry-run         Affiche le SQL sans exécuter
   --verbose, -v     Logs détaillés (debug)
   --yes, -y         Confirme automatiquement (CI/automation ; ex. state apply)
+  --plaintext       N'écrit pas les credentials chiffrés (même si une clé existe)
   --help, -h        Cette aide
 
 ${CYAN}BASES DE DONNÉES:${NC}
@@ -2476,6 +2681,17 @@ ${CYAN}SÉCURITÉ & ROTATION:${NC}
   security rotate       <user>       Renouvelle le mdp d'un utilisateur (+ credentials)
   security rotate-due   [jours=90]   Renouvelle tous les mdp échus (exclut l'admin courant)
 
+${CYAN}CHIFFREMENT & CREDENTIALS:${NC}
+  key create [--force]               Créer la clé de chiffrement (~/.config/devops/.enckey)
+  key status                         État de la clé + nb de credentials chiffrés
+  key show                           Afficher la clé (confirmation)
+  key rotate                         Renouveler la clé et re-chiffrer les credentials
+  key delete                         Supprimer la clé
+  cred list [db]                     Lister les credentials (par base)
+  cred show <db> <user>             Afficher un credential (déchiffré)
+  cred path                          Chemin du dossier des credentials
+  ${WHITE}— Les nouveaux mots de passe sont chiffrés automatiquement si une clé existe —${NC}
+
 ${CYAN}MONITORING:${NC}
   monitor stats
   monitor connections
@@ -2536,6 +2752,7 @@ main() {
             --dry-run)     DRY_RUN=true ;;
             --verbose|-v)  VERBOSE=true ;;
             --yes|-y)      ASSUME_YES=true ;;
+            --plaintext)   NO_ENCRYPT=true ;;
             --help|-h)     show_help; exit 0 ;;
             *)             args+=("$arg") ;;
         esac
@@ -2676,6 +2893,8 @@ main() {
                 *)      log_error "Sous-commande inconnue: state $sub (plan|apply|drift|export)"; exit 1 ;;
             esac ;;
         test)   check_connection ;;
+        key)    key_manage "$@" ;;
+        cred)   cred_manage "$@" ;;
         config) _configure_connection ;;
         help)   show_help ;;
         *)
