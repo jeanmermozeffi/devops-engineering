@@ -1932,8 +1932,8 @@ PY
             log_info "Arrêt des conteneurs existants..."
             docker compose -f docker-compose.registry.yml -f docker-compose.${env}-registry.yml down || true
 
-            log_info "Téléchargement de l'image..."
-            docker pull "$image_full"
+            # Version déjà présente localement : pas de nouveau pull (tag "latest" re-vérifié)
+            bash "$SCRIPT_DIR/images.sh" ensure "$image_full"
 
             log_info "Démarrage des services..."
             docker compose -f docker-compose.registry.yml -f docker-compose.${env}-registry.yml up -d

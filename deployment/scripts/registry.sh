@@ -1498,15 +1498,12 @@ cmd_build() {
     if docker buildx version &>/dev/null; then
         use_buildx=true
 
-        # Créer ou utiliser un builder buildx si nécessaire
-        buildx_builder="devops-builder"
-        if ! docker buildx inspect "$buildx_builder" &>/dev/null; then
-            log_info "Création du builder Docker Buildx: $buildx_builder"
-            docker buildx create --name "$buildx_builder" --driver docker-container --driver-opt network=host --bootstrap --use
-        else
-            log_info "Utilisation du builder existant: $buildx_builder"
-            docker buildx use "$buildx_builder"
-        fi
+        # Build mono-architecture : builder natif du contexte Docker (driver
+        # "docker"). Il partage le magasin d'images local : une image de base
+        # déjà présente (ex. apache/airflow) n'est ni retéléchargée ni stockée
+        # une seconde fois, contrairement à un builder docker-container.
+        buildx_builder="$(docker context show 2>/dev/null || echo default)"
+        log_info "Builder Docker Buildx: $buildx_builder (images locales réutilisées)"
 
         log_info "Docker Buildx activé - Build pour architecture locale uniquement (pour éviter les erreurs)"
         log_info "Pour build multi-arch, utilisez: ./registry.sh build-push $env"
@@ -1611,6 +1608,7 @@ cmd_build() {
         # Build avec buildx pour l'architecture locale (évite l'erreur manifest lists)
         # Note: --load ne supporte qu'une seule plateforme à la fois
         docker buildx build \
+            --builder "$buildx_builder" \
             --tag "$full_image_name" \
             --tag "$full_image_latest" \
             "${build_args[@]}" \
@@ -1776,14 +1774,16 @@ cmd_build_push_multiarch() {
     # Connexion registry après la sélection des plateformes pour une meilleure UX interactive
     registry_login
 
-    # Créer ou utiliser un builder buildx
+    # Builder docker-container (requis pour le multi-arch et --cache-to).
+    # Sélectionné via --builder, jamais via "docker buildx use" : ce dernier
+    # changerait le builder par défaut de toute la machine, et les builds
+    # suivants (docker compose build compris) retéléchargeraient leurs images de base.
     local buildx_builder="devops-builder"
     if ! docker buildx inspect "$buildx_builder" &>/dev/null; then
         log_info "Création du builder Docker Buildx: $buildx_builder"
-        docker buildx create --name "$buildx_builder" --driver docker-container --driver-opt network=host --bootstrap --use
+        docker buildx create --name "$buildx_builder" --driver docker-container --driver-opt network=host --bootstrap
     else
         log_info "Utilisation du builder existant: $buildx_builder"
-        docker buildx use "$buildx_builder"
     fi
 
     # Arguments de build
@@ -1939,7 +1939,7 @@ cmd_build_push_multiarch() {
     log_info "Démarrage du build multi-arch et push..."
     print_separator
 
-    docker buildx build "${build_args[@]}" "${secret_args[@]}" "$build_context"
+    docker buildx build --builder "$buildx_builder" "${build_args[@]}" "${secret_args[@]}" "$build_context"
 
     # Nettoyer les fichiers de secrets temporaires
     if [ -n "$secret_file" ] && [ -f "$secret_file" ]; then

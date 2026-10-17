@@ -1043,6 +1043,21 @@ cmd_monitoring() {
     bash "$monitoring_script" "$@"
 }
 
+cmd_images() {
+    load_project_config
+    export PROJECT_ROOT="$CURRENT_PROJECT_DIR"
+    export PROJECT_RUNTIME_ROOT="${PROJECT_RUNTIME_ROOT:-$CURRENT_PROJECT_DIR}"
+
+    local images_script="$DEVOPS_ROOT/scripts/images.sh"
+    if [ ! -f "$images_script" ]; then
+        log_error "Script images.sh introuvable: $images_script"
+        exit 1
+    fi
+
+    log_header "IMAGES DOCKER - $PROJECT_NAME"
+    bash "$images_script" "$@"
+}
+
 cmd_labels() {
     load_project_config
     export PROJECT_ROOT="$CURRENT_PROJECT_DIR"
@@ -1246,6 +1261,7 @@ cmd_help() {
     echo -e "    ${GREEN}audit${NC}                   Audit de sécurité du projet"
     echo -e "    ${GREEN}encrypt [--keep-clear]${NC}  Chiffrer les fichiers .env"
     echo -e "    ${GREEN}labels [sync|check]${NC}     Standardiser/verifier les labels <namespace>.*"
+    echo -e "    ${GREEN}images [check|pull] <env>${NC} Images présentes/absentes ; pull des seules absentes"
     echo -e "    ${GREEN}help${NC}                    Afficher cette aide"
     echo ""
     echo -e "${WHITE}EXEMPLES:${NC}"
@@ -1268,6 +1284,8 @@ cmd_help() {
     echo -e "    ${CYAN}devops labels sync${NC}          # Forcer les labels du namespace configure"
     echo -e "    ${CYAN}devops labels sync --label-prefix orange${NC}"
     echo -e "    ${CYAN}devops labels check${NC}         # Vérifier la conformité des labels"
+    echo -e "    ${CYAN}devops images check dev${NC}     # Quelles images sont déjà là (rien n'est téléchargé)"
+    echo -e "    ${CYAN}devops images pull dev${NC}      # Télécharger uniquement les absentes"
     echo ""
     echo -e "${WHITE}CONFIGURATION:${NC}"
     echo ""
@@ -1328,6 +1346,9 @@ main() {
             ;;
         labels)
             cmd_labels "$@"
+            ;;
+        images)
+            cmd_images "$@"
             ;;
         interactive|menu)
             cmd_interactive
