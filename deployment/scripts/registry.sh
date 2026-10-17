@@ -121,10 +121,10 @@ resolve_orchestrator_airflow_build_config() {
     fi
 
     if [ -z "$airflow_version" ]; then
-        airflow_version="${AIRFLOW_VERSION:-3.0.4}"
+        airflow_version="${AIRFLOW_VERSION:-3.3.1}"
     fi
     if [ -z "$airflow_base_image" ]; then
-        airflow_base_image="apache/airflow:${airflow_version}-python3.11"
+        airflow_base_image="apache/airflow:${airflow_version}-python3.12"
     fi
 
     echo "${airflow_version}|${airflow_base_image}|${env_file}"

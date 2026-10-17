@@ -429,7 +429,7 @@ stack_type: fastapi-redis
 # Orchestrator / Airflow (optionnel)
 # Utilisé si stack_type: orchestrator
 airflow_version: 3.0.4
-airflow_base_image: apache/airflow:3.0.4-python3.11
+airflow_base_image: apache/airflow:3.3.1-python3.12
 airflow_dags_folder_default: /opt/airflow/src/airflow_src/dags
 airflow_plugins_folder_default: /opt/airflow/src/airflow_src/plugins
 
@@ -557,7 +557,7 @@ label_namespace: cic
 
 # Orchestrator / Airflow (optionnel)
 airflow_version: 3.0.4
-airflow_base_image: apache/airflow:3.0.4-python3.11
+airflow_base_image: apache/airflow:3.3.1-python3.12
 airflow_dags_folder_default: /opt/airflow/src/airflow_src/dags
 airflow_plugins_folder_default: /opt/airflow/src/airflow_src/plugins
 

@@ -460,8 +460,8 @@ load_devops_config() {
     export WORKDIR="${WORKDIR:-/app}"
 
     # Orchestrator / Airflow (defaults centralisés et surchargeables via .devops.yml/.env/shell)
-    export AIRFLOW_VERSION="${AIRFLOW_VERSION:-3.0.4}"
-    export AIRFLOW_BASE_IMAGE="${AIRFLOW_BASE_IMAGE:-apache/airflow:${AIRFLOW_VERSION}-python3.11}"
+    export AIRFLOW_VERSION="${AIRFLOW_VERSION:-3.3.1}"
+    export AIRFLOW_BASE_IMAGE="${AIRFLOW_BASE_IMAGE:-apache/airflow:${AIRFLOW_VERSION}-python3.12}"
     export AIRFLOW_DAGS_FOLDER_DEFAULT="${AIRFLOW_DAGS_FOLDER_DEFAULT:-/opt/airflow/src/airflow_src/dags}"
     export AIRFLOW_PLUGINS_FOLDER_DEFAULT="${AIRFLOW_PLUGINS_FOLDER_DEFAULT:-/opt/airflow/src/airflow_src/plugins}"
 
